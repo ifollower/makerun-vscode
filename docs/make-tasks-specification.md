@@ -1,6 +1,6 @@
-# Make Tasks Specification
+# Make Run Tasks Specification
 
-The Make Tasks Specification defines the Makefile annotations and task behavior supported by the [Make Tasks](../README.md) extension for the [Visual Studio Code task system](https://code.visualstudio.com/docs/debugtest/tasks). It establishes a compact contract for documented-target discovery, descriptions, categories, inputs, task resolution, execution, and workspace presentation.
+The Make Run Tasks Specification defines the Makefile annotations and task behavior supported by the [Make Run Tasks](../README.md) extension for the [Visual Studio Code task system](https://code.visualstudio.com/docs/debugtest/tasks). It establishes a compact contract for documented-target discovery, descriptions, categories, inputs, task resolution, execution, and workspace presentation.
 
 The specification covers only the extension's recognized annotation subset. [GNU Make](https://www.gnu.org/software/make/manual/make.html) remains authoritative for Makefile syntax, dependency evaluation, recipes, and execution semantics.
 
@@ -34,11 +34,11 @@ The specification covers only the extension's recognized annotation subset. [GNU
 
 ## 1. Specification
 
-The specification defines the supported annotation syntax, discovery and task behavior, configuration controls, and representative examples for Make Tasks.
+The specification defines the supported annotation syntax, discovery and task behavior, configuration controls, and representative examples for Make Run Tasks.
 
 ### 1.1. Scope
 
-Make Tasks exposes documented Makefile targets through an Activity Bar explorer, extension commands, and the Visual Studio Code task system. This specification defines the annotation and integration behavior required for those interfaces; it does not define general Makefile parsing.
+Make Run Tasks exposes documented Makefile targets through an Activity Bar explorer, extension commands, and the Visual Studio Code task system. This specification defines the annotation and integration behavior required for those interfaces; it does not define general Makefile parsing.
 
 #### 1.1.1. Conformance
 
@@ -169,6 +169,10 @@ The working directory MUST be the directory containing the selected Makefile. Ar
 
 Text entered through **Run Target with Arguments** is tokenized without applying shell grammar. Whitespace separates arguments except inside single or double quotes. Backslash escapes the following character outside single quotes. Quote delimiters are removed, and unterminated quoted input MUST be rejected without executing the task.
 
+Explorer and editor run commands MUST save dirty selected Makefiles and revalidate their documented target names before launching tasks. Failure to save or resolve any selected target MUST prevent the batch from starting.
+
+Batch execution MUST support sequential and parallel modes. Sequential mode MUST use check order, wait for each task's completion, and stop on a non-zero or unavailable exit code. Parallel mode MUST launch separate tasks with dedicated task terminals, preserving each target's workspace and working directory. Cancelling a batch MUST terminate its running tasks and skip any targets not yet launched.
+
 #### 1.3.4. Presentation
 
 Targets MUST remain distinguishable by workspace folder and Makefile when more than one scope exists. When at least one target in a Makefile has a category, categorized targets MUST be grouped by category and targets without a category MUST appear under **Uncategorized**.
@@ -176,6 +180,12 @@ Targets MUST remain distinguishable by workspace folder and Makefile when more t
 The categories `Build`, `Test`, `Clean`, `Rebuild`, and `Rebuild All` MUST map case-insensitively to the corresponding built-in Visual Studio Code task group. Other category names remain presentation metadata.
 
 A retained usage suffix MUST be shown in the target picker, explorer tooltip, generated task detail, and argument-input prompt. The description MUST remain visible in target-selection and task-detail surfaces, and the source location MUST remain available for navigation.
+
+The explorer MUST offer an explicit multi-select mode with target checkboxes and a selected count. Clicking a target in this mode MUST change selection instead of running it. Selections MUST distinguish targets by Makefile URI and name, preserve check order through refresh, and remove targets that no longer exist. Separate **Run in Sequence** and **Run in Parallel** toolbar actions MUST start the selected targets immediately without a mode picker, and MUST be disabled with no selection or while a batch is running. Leaving multi-select mode MUST clear selection and restore click-to-navigate behavior.
+
+Outside multi-select mode, clicking a target name MUST open its Makefile definition. Single-target execution MUST use explicit inline run actions. The single-target picker MUST remain available in the Command Palette and MUST NOT appear in the explorer toolbar.
+
+When `makefileTasks.codeLens` is enabled, matching workspace Makefiles MUST offer run and argument-input CodeLens actions for documented targets, using current editor text. The actions MUST honor configured include and exclusion patterns. VS Code's global `editor.codeLens` setting controls whether they are displayed.
 
 #### 1.3.5. Refresh and Error Handling
 
@@ -201,7 +211,9 @@ Configuration settings are grouped by the behavior they control.
 | Setting                     | Default | Purpose                                                       |
 | --------------------------- | ------- | ------------------------------------------------------------- |
 | `makefileTasks.makeCommand` | `make`  | Defines the executable or command supplied to task execution. |
-| `makefileTasks.runOnClick`  | `true`  | Runs a target when its explorer item is selected.             |
+| `makefileTasks.codeLens`    | `true`  | Shows editor run and argument-input CodeLens actions.         |
+
+The former `makefileTasks.runOnClick` setting is no longer used; normal target clicks always navigate to their definitions.
 
 #### 1.4.3. Presentation and Refresh Configuration
 
@@ -343,10 +355,10 @@ None of these constructs produces a discovered target.
 - Visual Studio Code [Task Provider](https://code.visualstudio.com/api/extension-guides/task-provider) documentation.
 - IETF [RFC 2119](https://www.rfc-editor.org/rfc/rfc2119) standard.
 - IETF [RFC 8174](https://www.rfc-editor.org/rfc/rfc8174) standard.
-- Make Tasks [parser](../src/parser.ts) implementation.
-- Make Tasks [parser tests](../test/parser.test.ts) test suite.
-- Make Tasks [task provider](../src/tasks.ts) implementation.
-- Make Tasks [discovery](../src/discovery.ts) implementation.
-- Make Tasks [extension activation](../src/extension.ts) implementation.
-- Make Tasks [explorer](../src/tree.ts) implementation.
-- Make Tasks [extension manifest](../package.json) implementation.
+- Make Run Tasks [parser](../src/parser.ts) implementation.
+- Make Run Tasks [parser tests](../test/parser.test.ts) test suite.
+- Make Run Tasks [task provider](../src/tasks.ts) implementation.
+- Make Run Tasks [discovery](../src/discovery.ts) implementation.
+- Make Run Tasks [extension activation](../src/extension.ts) implementation.
+- Make Run Tasks [explorer](../src/tree.ts) implementation.
+- Make Run Tasks [extension manifest](../package.json) implementation.

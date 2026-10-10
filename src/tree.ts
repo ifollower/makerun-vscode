@@ -40,11 +40,17 @@ export function targetFromArgument(value: unknown): MakefileTarget | undefined {
   return undefined;
 }
 
+function targetId(target: MakefileTarget): string {
+  return JSON.stringify([target.makefileUri.toString(), target.name]);
+}
+
 export class MakefileTreeProvider implements vscode.TreeDataProvider<TreeNode> {
   private readonly changed = new vscode.EventEmitter<TreeNode | undefined | null | void>();
   public readonly onDidChangeTreeData = this.changed.event;
 
   private documents: readonly MakefileDocument[] = [];
+  private selectionMode = false;
+  private readonly selected = new Map<string, MakefileTarget>();
   private readonly categoryIconPath?: { readonly light: vscode.Uri; readonly dark: vscode.Uri };
   private readonly taskIconPath?: { readonly light: vscode.Uri; readonly dark: vscode.Uri };
 
@@ -64,7 +70,53 @@ export class MakefileTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 
   public setDocuments(documents: readonly MakefileDocument[]): void {
     this.documents = documents;
+    const available = new Map(documents.flatMap((document) => document.targets).map((target) => [targetId(target), target]));
+    for (const id of this.selected.keys()) {
+      const target = available.get(id);
+      if (target) {
+        this.selected.set(id, target);
+      } else {
+        this.selected.delete(id);
+      }
+    }
     this.changed.fire();
+  }
+
+  public get isSelectionMode(): boolean {
+    return this.selectionMode;
+  }
+
+  public setSelectionMode(enabled: boolean): void {
+    this.selectionMode = enabled;
+    if (!enabled) {
+      this.selected.clear();
+    }
+    this.changed.fire();
+  }
+
+  public getSelectedTargets(): MakefileTarget[] {
+    return [...this.selected.values()];
+  }
+
+  public setTargetSelected(target: MakefileTarget, checked: boolean): void {
+    if (!this.selectionMode) {
+      return;
+    }
+    if (checked) {
+      this.selected.set(targetId(target), target);
+    } else {
+      this.selected.delete(targetId(target));
+    }
+    this.changed.fire();
+  }
+
+  public clearSelection(): void {
+    this.selected.clear();
+    this.changed.fire();
+  }
+
+  public dispose(): void {
+    this.changed.dispose();
   }
 
   public getDocuments(): readonly MakefileDocument[] {
@@ -98,6 +150,7 @@ export class MakefileTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 
     const target = element.target;
     const item = new vscode.TreeItem(target.name, vscode.TreeItemCollapsibleState.None);
+    item.id = targetId(target);
     item.iconPath = this.taskIconPath ?? new vscode.ThemeIcon('play');
     item.contextValue = 'makefileTarget';
     const usage = target.usage ? `  \nUsage: ${codeSpan(`make ${target.name} ${target.usage}`)}` : '';
@@ -105,10 +158,23 @@ export class MakefileTreeProvider implements vscode.TreeDataProvider<TreeNode> {
     item.tooltip = new vscode.MarkdownString(
       `${escapeMarkdown(target.description)}${usage}${category}  \n\`${escapeMarkdown(target.makefileRelativePath)}:${target.line + 1}\``,
     );
-    if (vscode.workspace.getConfiguration('makefileTasks').get<boolean>('runOnClick', true)) {
+    if (this.selectionMode) {
+      const selectionIndex = [...this.selected.keys()].indexOf(targetId(target));
+      if (selectionIndex >= 0) {
+        item.description = `#${selectionIndex + 1}`;
+      }
+      item.checkboxState = this.selected.has(targetId(target))
+        ? vscode.TreeItemCheckboxState.Checked
+        : vscode.TreeItemCheckboxState.Unchecked;
       item.command = {
-        command: 'makefileTasks.runTarget',
-        title: 'Run Target',
+        command: 'makefileTasks.toggleTargetSelection',
+        title: 'Select Target',
+        arguments: [element],
+      };
+    } else {
+      item.command = {
+        command: 'makefileTasks.openTarget',
+        title: 'Go to Target Definition',
         arguments: [element],
       };
     }

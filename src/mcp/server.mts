@@ -24,7 +24,7 @@ export function createMakeTasksServer(
   root: string = process.env.MAKE_TASKS_MCP_ROOT ?? process.cwd(),
 ): McpServer {
   const server = new McpServer({
-    name: 'vs-code-make-tasks',
+    name: 'make-run-tasks',
     version: packageVersion,
   });
 

@@ -1,4 +1,4 @@
-# VS Code Make Tasks
+# Make Run Tasks
 
 A native VS Code task explorer for documented Makefile targets.
 
@@ -7,20 +7,21 @@ A native VS Code task explorer for documented Makefile targets.
   - [1.2. Usage](#12-usage)
   - [1.3. MCP Server](#13-mcp-server)
 - [2. Contribution](#2-contribution)
+- [Publishing](docs/publishing.md)
 
 ## 1. Details
 
 ### 1.1. Prerequisites
 
 - [Visual Studio Code](https://code.visualstudio.com/download)
-  > Visual Studio Code (>=1.133) is required to run the extension.
+  > Visual Studio Code (>=1.134) is required to run the extension.
 
 ### 1.2. Usage
 
 1. Insights and Details
 
     - Specification
-      > The [Make Tasks Specification](docs/make-tasks-specification.md) is the normative reference for annotation syntax and externally observable behavior.
+      > The [Make Run Tasks Specification](docs/make-tasks-specification.md) is the normative reference for annotation syntax and externally observable behavior.
 
     - Activity Bar
       > Dedicated Makefile icon and target explorer in the Activity Bar.
@@ -34,8 +35,14 @@ A native VS Code task explorer for documented Makefile targets.
     - Quick Pick
       > Keyboard-driven target selection and execution.
 
+    - Batch Execution
+      > Check multiple targets and run them in sequence or in parallel, with cancellable progress.
+
+    - Editor Actions
+      > Run documented targets directly from CodeLens links above Makefile rules.
+
     - Navigation
-      > Direct navigation to target definitions.
+      > Click a target name to open its Makefile definition. Run it with the inline play action.
 
     - Workspace
       > Multi-root workspace and multiple-Makefile support.
@@ -44,7 +51,7 @@ A native VS Code task explorer for documented Makefile targets.
       > Automatic target refresh after matching Makefile changes when `makefileTasks.autoRefresh` is enabled.
 
     - Configuration
-      > Configurable Make command, discovery globs, exclusions, sorting, click behavior, and automatic refresh.
+      > Configurable Make command, discovery globs, exclusions, sorting, editor actions, and automatic refresh.
 
 2. Usage and Instructions
 
@@ -109,6 +116,20 @@ A native VS Code task explorer for documented Makefile targets.
       .PHONY: build
       ```
 
+### Run multiple targets
+
+1. Open **Make Run Tasks** and click **Toggle Multi-select Mode** (the checklist icon).
+2. Check targets, or click their names, in the order you want to run them. The explorer shows the selected count and order numbers beside checked targets. Selections persist when categories are collapsed and across refreshes; targets from different Makefiles or workspace folders stay distinct.
+3. Click either toolbar action to start immediately: **Run in Sequence** (the ordered-list icon) or **Run in Parallel** (the run-all icon).
+
+Sequential execution waits for each task to finish and stops on failure or termination. Parallel execution starts each target as a separate VS Code task with its own terminal; use it for independent tasks. Both modes use each target's own Makefile directory. **Cancel** in the progress notification terminates this batch's running tasks and skips remaining targets. Selections are retained for another run; **Clear Selection** clears them, and leaving multi-select mode restores click-to-navigate behavior. Outside multi-select mode, click a target's name to open its Makefile definition, or click its inline play action to run it. The single-target picker remains available through **Make Run Tasks: Run Target…** in the Command Palette.
+
+### Run from the Makefile editor
+
+Above each documented target, **▶ Run target** runs it immediately and **Run target with Arguments…** opens the existing argument input. Rules with multiple target names have separate links for each target. Lenses follow the current editor text. Before an explorer or editor action runs, any selected Makefile with unsaved changes is saved and its targets are checked again.
+
+Editor actions follow `makefileTasks.fileGlobs` and `makefileTasks.excludeGlob` and apply to files inside workspace folders. They use the same `##` documentation requirement as the explorer. Disable them with `"makefileTasks.codeLens": false`; VS Code's `editor.codeLens` must also be enabled.
+
 ### 1.3. MCP Server
 
 The optional stdio MCP server exposes the extension's Makefile parser to AI agents without executing Make. Its `list_make_targets` tool returns documented targets, descriptions, categories, usage metadata, and zero-based source lines.
@@ -146,8 +167,8 @@ The server uses stdout exclusively for MCP messages and writes its readiness mes
     - VS Code [Extension Anatomy](https://code.visualstudio.com/api/get-started/extension-anatomy)
       > Anatomy of a VS Code extension, including the structure of the extension folder and the purpose of each file.
 
-    - VS Code [Publisher Marketplace](https://marketplace.visualstudio.com/manage/publishers/sentenz)
-      > The publisher page for the extension, including version history, download statistics, and links to the source repository.
+    - [Publishing Make Run Tasks](docs/publishing.md)
+      > Create your own Marketplace publisher, configure its ID, and upload the packaged extension.
 
 2. Usage and Instructions
 
@@ -160,3 +181,7 @@ The server uses stdout exclusively for MCP messages and writes its readiness mes
       make vsce-package
       make vsce-install
       ```
+
+      VSIX artifacts are written to the Git-ignored `out/` directory. Run `npm run package` to generate `out/make-run-tasks-<version>.vsix`.
+
+Make Run Tasks is a fork of [sentenz/vscode-make-tasks](https://github.com/sentenz/vscode-make-tasks). The original license and copyright notice are retained in [LICENSE](LICENSE).

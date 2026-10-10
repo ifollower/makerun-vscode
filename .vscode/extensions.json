@@ -23,7 +23,6 @@
     "davidanson.vscode-markdownlint",
     "alefragnani.project-manager",
     "tsandall.opa",
-    "mermaidchart.vscode-mermaid-chart",
-    "sentenz.vs-code-make-tasks"
+    "mermaidchart.vscode-mermaid-chart"
   ]
 }

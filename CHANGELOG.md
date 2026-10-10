@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.7.6 (2026-10-09)
+
+### Features
+
+* Rename the extension and its visible UI to Make Run Tasks under publisher ai-follwer, update fork repository links, and add publishing instructions.
+* Use make-run-tasks as the Marketplace package name.
+* Add an explorer multi-select mode with checkboxes, ordered selection, separate sequence and parallel toolbar actions, and cancellation.
+* Open Makefile definitions when target names are clicked; keep execution on explicit inline actions and remove the single-target picker from the explorer toolbar.
+* Add configurable CodeLens run and argument actions above documented Makefile targets, saving dirty Makefiles before execution.
+
 ## [1.7.5](https://github.com/sentenz/vscode-make-tasks/compare/1.7.4...1.7.5) (2026-10-04)
 
 ### Bug Fixes
