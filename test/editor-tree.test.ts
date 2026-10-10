@@ -29,12 +29,13 @@ beforeEach(() => {
 });
 
 describe('explorer selection', () => {
-  it('opens target definitions on normal clicks and selects targets in multi-select mode', () => {
+  it('runs targets on normal clicks and selects targets in multi-select mode', () => {
     const tree = new MakefileTreeProvider();
     const node: TargetNode = { kind: 'target', target: target('build') };
-    // Legacy user settings must not restore accidental click-to-run behavior.
-    mock.settings.set('runOnClick', true);
-    expect(tree.getTreeItem(node).command?.command).toBe('makefileTasks.openTarget');
+    // The fixed interaction also applies when an old click preference is present.
+    mock.settings.set('runOnClick', false);
+    expect(tree.getTreeItem(node).command?.command).toBe('makefileTasks.runTarget');
+    expect(tree.getTreeItem(node).command?.arguments).toEqual([node]);
     tree.setSelectionMode(true);
     expect(tree.getTreeItem(node).command?.command).toBe('makefileTasks.toggleTargetSelection');
     expect(tree.getTreeItem(node).checkboxState).toBe(mock.TreeItemCheckboxState.Unchecked);
@@ -42,7 +43,7 @@ describe('explorer selection', () => {
     expect(tree.getTreeItem(node).checkboxState).toBe(mock.TreeItemCheckboxState.Checked);
     tree.setSelectionMode(false);
     expect(tree.getSelectedTargets()).toEqual([]);
-    expect(tree.getTreeItem(node).command?.command).toBe('makefileTasks.openTarget');
+    expect(tree.getTreeItem(node).command?.command).toBe('makefileTasks.runTarget');
   });
 
   it('preserves check order across refresh, updates metadata and removes deleted targets', () => {

@@ -173,8 +173,8 @@ export class MakefileTreeProvider implements vscode.TreeDataProvider<TreeNode> {
       };
     } else {
       item.command = {
-        command: 'makefileTasks.openTarget',
-        title: 'Go to Target Definition',
+        command: 'makefileTasks.runTarget',
+        title: 'Run Target',
         arguments: [element],
       };
     }

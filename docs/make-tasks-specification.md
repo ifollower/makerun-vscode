@@ -181,9 +181,9 @@ The categories `Build`, `Test`, `Clean`, `Rebuild`, and `Rebuild All` MUST map c
 
 A retained usage suffix MUST be shown in the target picker, explorer tooltip, generated task detail, and argument-input prompt. The description MUST remain visible in target-selection and task-detail surfaces, and the source location MUST remain available for navigation.
 
-The explorer MUST offer an explicit multi-select mode with target checkboxes and a selected count. Clicking a target in this mode MUST change selection instead of running it. Selections MUST distinguish targets by Makefile URI and name, preserve check order through refresh, and remove targets that no longer exist. The **Run in Sequence** toolbar action MUST use the run-all icon, start the selected targets immediately without a mode picker, and be disabled with no selection or while the launch is being prepared. Leaving multi-select mode MUST clear selection and restore click-to-navigate behavior.
+The explorer MUST offer an explicit multi-select mode with target checkboxes and a selected count. Clicking a target in this mode MUST change selection instead of running it. Selections MUST distinguish targets by Makefile URI and name, preserve check order through refresh, and remove targets that no longer exist. The **Run in Sequence** toolbar action MUST use the run-all icon, start the selected targets immediately without a mode picker, and be disabled with no selection or while the launch is being prepared. Leaving multi-select mode MUST clear selection and restore click-to-run behavior.
 
-Outside multi-select mode, clicking a target name MUST open its Makefile definition. Single-target execution MUST use explicit inline run actions. The single-target picker MUST remain available in the Command Palette and MUST NOT appear in the explorer toolbar.
+Outside multi-select mode, clicking a target name MUST run it directly. The explorer MUST NOT offer a separate inline Run Target button. It MUST offer inline Run Target with Arguments and Go to Target Definition actions; navigation MUST remain available in multi-select mode. The single-target picker MUST remain available in the Command Palette and MUST NOT appear in the explorer toolbar.
 
 When `makefileTasks.codeLens` is enabled, matching workspace Makefiles MUST offer run and argument-input CodeLens actions for documented targets, using current editor text. The actions MUST honor configured include and exclusion patterns. VS Code's global `editor.codeLens` setting controls whether they are displayed.
 
@@ -213,7 +213,7 @@ Configuration settings are grouped by the behavior they control.
 | `makefileTasks.makeCommand` | `make`  | Defines the executable or command supplied to task execution. |
 | `makefileTasks.codeLens`    | `true`  | Shows editor run and argument-input CodeLens actions.         |
 
-The former `makefileTasks.runOnClick` setting is no longer used; normal target clicks always navigate to their definitions.
+The former `makefileTasks.runOnClick` setting is no longer used; normal target clicks always run the selected target, while clicks in multi-select mode toggle selection.
 
 #### 1.4.3. Presentation and Refresh Configuration
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.8 (2026-10-10)
+
+* Run individual targets when their names are clicked; replace the inline run button with navigation to the Makefile definition and keep the argument action.
+
 ## 1.7.7 (2026-10-10)
 
 * Remove Run in Parallel and use its run-all icon for Run in Sequence.

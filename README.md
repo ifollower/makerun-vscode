@@ -42,7 +42,7 @@ A native VS Code task explorer for documented Makefile targets.
       > Run documented targets directly from CodeLens links above Makefile rules.
 
     - Navigation
-      > Click a target name to open its Makefile definition. Run it with the inline play action.
+      > Click a target name to run it. Use its inline actions to run with arguments or open its Makefile definition.
 
     - Workspace
       > Multi-root workspace and multiple-Makefile support.
@@ -122,7 +122,7 @@ A native VS Code task explorer for documented Makefile targets.
 2. Check targets from the same Makefile, or click their names, in the order you want to pass them to Make. The explorer shows the selected count and order numbers beside checked targets. Selections persist when categories are collapsed and across refreshes; targets from different Makefiles or workspace folders stay distinct.
 3. Click **Run in Sequence** (the run-all icon) in the toolbar to start immediately.
 
-The action launches one VS Code task running `make -f <Makefile> target1 target2 ...` in the selected Makefile directory. Output appears directly in the task terminal; stop it with Ctrl+C or **Tasks: Terminate Task**. There is no progress notification. Mixed Makefile selections are rejected before execution. Make handles dependencies, failures, and goal execution; its settings (including `MAKEFLAGS` and parallelism) still apply. Shared dependencies are built only once per invocation. Selections are retained for another run; **Clear Selection** clears them, and leaving multi-select mode restores click-to-navigate behavior. Outside multi-select mode, click a target's name to open its Makefile definition, or click its inline play action to run it. The single-target picker remains available through **Make Run Tasks: Run Target…** in the Command Palette.
+The action launches one VS Code task running `make -f <Makefile> target1 target2 ...` in the selected Makefile directory. Output appears directly in the task terminal; stop it with Ctrl+C or **Tasks: Terminate Task**. There is no progress notification. Mixed Makefile selections are rejected before execution. Make handles dependencies, failures, and goal execution; its settings (including `MAKEFLAGS` and parallelism) still apply. Shared dependencies are built only once per invocation. Selections are retained for another run; **Clear Selection** clears them, and leaving multi-select mode restores click-to-run behavior. Outside multi-select mode, click a target's name to run it directly. The inline **Run Target with Arguments** action opens the argument input, and **Go to Target Definition** opens its Makefile at the target's rule. The navigation action is also available in multi-select mode. The single-target picker remains available through **Make Run Tasks: Run Target…** in the Command Palette.
 
 ### Run from the Makefile editor
 
