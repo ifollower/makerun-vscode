@@ -1,6 +1,6 @@
 # 发布 Make Run Tasks
 
-项目已使用 `name: make-run-tasks`、`displayName: Make Run Tasks`、`publisher: ai-follwer`，扩展 ID 为 `ai-follwer.make-run-tasks`，仓库链接指向 [ifollower/makerun-vscode](https://github.com/ifollower/makerun-vscode)。当前版本为 `1.7.6`。
+项目已使用 `name: make-run-tasks`、`displayName: Make Run Tasks`、`publisher: ai-follwer`，扩展 ID 为 `ai-follwer.make-run-tasks`，仓库链接指向 [ifollower/makerun-vscode](https://github.com/ifollower/makerun-vscode)。当前版本为 `1.7.7`。
 
 原内部名称 `make-run` 已被 Marketplace 中的其他扩展占用，现使用 `make-run-tasks` 作为内部名称。上传时使用以下新的 VSIX 文件。
 
@@ -15,7 +15,7 @@
    npm run package
    ```
 
-   生成的文件是 `out/make-run-tasks-1.7.6.vsix`。`out/` 会自动创建，并由 `.gitignore` 排除。更改 Publisher ID 或内部名称后需要重新打包。
+   生成的文件是 `out/make-run-tasks-1.7.7.vsix`。`out/` 会自动创建，并由 `.gitignore` 排除。更改 Publisher ID 或内部名称后需要重新打包。
 4. 可以先在 VS Code 的扩展面板菜单中选择 **Install from VSIX…** 验证这个包。
 5. 在 Marketplace 管理页选中自己的 Publisher，选择 **New extension → Visual Studio Code**，上传 VSIX 并提交发布。
 
@@ -27,7 +27,7 @@
 
 ```powershell
 npx --no-install vsce login ai-follwer
-npx --no-install vsce publish --packagePath ./out/make-run-tasks-1.7.6.vsix
+npx --no-install vsce publish --packagePath ./out/make-run-tasks-1.7.7.vsix
 ```
 
 在本机交互提示中输入 Token。
