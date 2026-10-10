@@ -1,8 +1,8 @@
 import * as path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as vscode from 'vscode';
-import { executeTaskAndWait, runMakeTargets } from '../src/batch';
-import { createMakeTask } from '../src/tasks';
+import { createMakeTargetsTask, runMakeTargets } from '../src/batch';
+import { MakefileTaskProvider } from '../src/tasks';
 import type { MakefileTarget } from '../src/model';
 import * as mock from './vscode-mock';
 
@@ -16,112 +16,60 @@ function target(name: string, makefile = 'Makefile'): MakefileTarget {
   };
 }
 
-function execution(): vscode.TaskExecution {
-  return { terminate: vi.fn(), task: {} as vscode.Task };
-}
-
 beforeEach(() => {
   vi.clearAllMocks();
+  mock.tasks.executeTask.mockReset();
   mock.settings.clear();
-  mock.token.isCancellationRequested = false;
 });
 
-describe('batch execution', () => {
-  it('waits for completion in selection order and stops on failure', async () => {
-    const executions: vscode.TaskExecution[] = [];
-    mock.tasks.executeTask.mockImplementation(async (): Promise<vscode.TaskExecution> => {
-      const started = execution();
-      executions.push(started);
-      return started;
-    });
-    const running = runMakeTargets([target('clean'), target('build'), target('test')], 'sequence');
-    await vi.waitFor(() => expect(executions).toHaveLength(1));
-    expect(mock.tasks.executeTask.mock.calls[0]?.[0].name).toBe('clean');
-    mock.processEnd.fire({ execution: executions[0], exitCode: 0 });
-    await vi.waitFor(() => expect(executions).toHaveLength(2));
-    expect(mock.tasks.executeTask.mock.calls[1]?.[0].name).toBe('build');
-    mock.processEnd.fire({ execution: executions[1], exitCode: 2 });
-    await running;
-    expect(executions).toHaveLength(2);
-    expect(mock.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining('Sequence stopped.'));
+describe('combined Make execution', () => {
+  it('launches one task with goals in selection order without tracking completion or showing progress', async () => {
+    await runMakeTargets([target('clean'), target('build'), target('test')]);
+    expect(mock.tasks.executeTask).toHaveBeenCalledOnce();
+    const task = mock.tasks.executeTask.mock.calls[0]?.[0] as vscode.Task;
+    expect((task.execution as unknown as mock.ShellExecution).args).toEqual(['-f', 'Makefile', 'clean', 'build', 'test']);
+    expect(task.name).toBe('clean build test');
+    expect(mock.window.withProgress).not.toHaveBeenCalled();
     expect(mock.processEnd.listenerCount).toBe(0);
     expect(mock.taskEnd.listenerCount).toBe(0);
   });
 
-  it('starts parallel tasks before either finishes, with independent directories and terminals', async () => {
-    const executions: vscode.TaskExecution[] = [];
-    mock.tasks.executeTask.mockImplementation(async (): Promise<vscode.TaskExecution> => {
-      const started = execution();
-      executions.push(started);
-      return started;
-    });
-    const running = runMakeTargets([target('build'), target('build', 'nested/Makefile')], 'parallel');
-    await vi.waitFor(() => expect(executions).toHaveLength(2));
-    const launched = mock.tasks.executeTask.mock.calls.map(([task]) => task as vscode.Task);
-    expect(launched.map((task) => task.presentationOptions.panel)).toEqual([mock.TaskPanelKind.Dedicated, mock.TaskPanelKind.Dedicated]);
-    expect(launched.map((task) => (task.execution as unknown as mock.ShellExecution).options.cwd))
-      .toEqual([mock.folder.uri.fsPath, path.join(mock.folder.uri.fsPath, 'nested')]);
-    mock.processEnd.fire({ execution: executions[1], exitCode: 0 });
-    mock.processEnd.fire({ execution: executions[0], exitCode: 0 });
-    await running;
-    expect(mock.window.showWarningMessage).not.toHaveBeenCalled();
+  it('preserves the configured executable, filename, working directory, and individual goal arguments', () => {
+    mock.settings.set('makeCommand', 'gmake');
+    const task = createMakeTargetsTask([target('build', 'nested folder/tasks.mk'), target('test', 'nested folder/tasks.mk')]);
+    const shell = task.execution as unknown as mock.ShellExecution;
+    expect(shell.command).toBe('gmake');
+    expect(shell.args).toEqual(['-f', 'tasks.mk', 'build', 'test']);
+    expect(shell.options.cwd).toBe(path.join(mock.folder.uri.fsPath, 'nested folder'));
   });
 
-  it('captures tasks that finish before executeTask returns, ignoring unrelated tasks', async () => {
-    const started = execution();
-    mock.tasks.executeTask.mockImplementation(async (): Promise<vscode.TaskExecution> => {
-      mock.processEnd.fire({ execution: execution(), exitCode: 9 });
-      mock.processEnd.fire({ execution: started, exitCode: 0 });
-      mock.taskEnd.fire({ execution: started });
-      return started;
-    });
-    await expect(executeTaskAndWait(createMakeTask(target('build')), mock.token)).resolves.toEqual({ exitCode: 0 });
+  it('rejects mixed Makefiles before launching any task', async () => {
+    await expect(runMakeTargets([target('build'), target('test', 'nested/Makefile')]))
+      .rejects.toThrow('same Makefile');
+    expect(mock.tasks.executeTask).not.toHaveBeenCalled();
   });
 
-  it('cancels only batch executions and skips queued tasks', async () => {
-    const started = execution();
-    const unrelated = execution();
-    mock.tasks.executeTask.mockResolvedValue(started);
-    const running = runMakeTargets([target('build'), target('test')], 'sequence');
-    await vi.waitFor(() => expect(mock.tasks.executeTask).toHaveBeenCalledTimes(1));
-    mock.token.isCancellationRequested = true;
-    mock.cancellation.fire();
-    await running;
-    expect(started.terminate).toHaveBeenCalledOnce();
-    expect(unrelated.terminate).not.toHaveBeenCalled();
-    expect(mock.tasks.executeTask).toHaveBeenCalledOnce();
-    expect(mock.cancellation.listenerCount).toBe(0);
+  it('launches nothing for an empty selection and supports a single selected goal', async () => {
+    await runMakeTargets([]);
+    expect(mock.tasks.executeTask).not.toHaveBeenCalled();
+    await runMakeTargets([target('build')]);
+    const task = mock.tasks.executeTask.mock.calls[0]?.[0] as vscode.Task;
+    expect((task.execution as unknown as mock.ShellExecution).args).toEqual(['-f', 'Makefile', 'build']);
   });
 
-  it('terminates an execution returned after cancellation', async () => {
-    const started = execution();
-    let launched!: (value: vscode.TaskExecution) => void;
-    mock.tasks.executeTask.mockImplementation(() => new Promise<vscode.TaskExecution>((resolve) => { launched = resolve; }));
-    const running = executeTaskAndWait(createMakeTask(target('build')), mock.token);
-    mock.token.isCancellationRequested = true;
-    mock.cancellation.fire();
-    launched(started);
-    await expect(running).resolves.toEqual({ cancelled: true });
-    expect(started.terminate).toHaveBeenCalledOnce();
+  it('preserves every selected goal when the task provider resolves a combined task again', () => {
+    const selected = [target('clean'), target('build'), target('test')];
+    const provider = new MakefileTaskProvider(() => [{
+      uri: selected[0]!.makefileUri, workspaceFolder: selected[0]!.workspaceFolder,
+      relativePath: 'Makefile', targets: selected,
+    }]);
+    const resolved = provider.resolveTask(createMakeTargetsTask(selected));
+    expect((resolved?.execution as unknown as mock.ShellExecution).args).toEqual(['-f', 'Makefile', 'clean', 'build', 'test']);
   });
 
-  it('stops the sequence when a task ends without a process exit code', async () => {
-    const started = execution();
-    mock.tasks.executeTask.mockImplementation(async (): Promise<vscode.TaskExecution> => {
-      mock.taskEnd.fire({ execution: started });
-      return started;
-    });
-    await runMakeTargets([target('build'), target('test')], 'sequence');
-    expect(mock.tasks.executeTask).toHaveBeenCalledOnce();
-    expect(mock.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining('terminated without an exit code'));
-  });
-
-  it('reports launch failures and disposes completion listeners', async () => {
+  it('propagates launch failures so the command can display its existing error message', async () => {
     mock.tasks.executeTask.mockRejectedValue(new Error('make unavailable'));
-    await runMakeTargets([target('build'), target('test')], 'sequence');
+    await expect(runMakeTargets([target('build'), target('test')])).rejects.toThrow('make unavailable');
     expect(mock.tasks.executeTask).toHaveBeenCalledOnce();
-    expect(mock.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining('make unavailable'));
-    expect(mock.processEnd.listenerCount).toBe(0);
-    expect(mock.taskEnd.listenerCount).toBe(0);
   });
 });

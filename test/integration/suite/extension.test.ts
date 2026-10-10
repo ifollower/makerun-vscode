@@ -2,7 +2,8 @@ import * as assert from 'node:assert/strict';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { executeTaskAndWait } from '../../../src/batch';
+import { createMakeTargetsTask } from '../../../src/batch';
+import { targetsInDocument } from '../../../src/codelens';
 
 type ExtensionManifest = {
   name: string;
@@ -37,11 +38,11 @@ suite('Make Run Tasks extension', () => {
       'makefileTasks.openTarget',
       'makefileTasks.toggleSelectionMode',
       'makefileTasks.runSelectedTargetsInSequence',
-      'makefileTasks.runSelectedTargetsInParallel',
       'makefileTasks.clearSelection',
     ]) {
       assert.ok(commands.has(command), `Expected command ${command} to be registered.`);
     }
+    assert.ok(!commands.has('makefileTasks.runSelectedTargetsInParallel'), 'Parallel execution should not be registered.');
   });
 
   test('offers editor run actions and follows unsaved edits', async () => {
@@ -80,29 +81,16 @@ suite('Make Run Tasks extension', () => {
     }
   });
 
-  test('observes real task exit codes and cancels a running task', async () => {
+  test('combines selected goals into one shell task in the selected Makefile directory', async () => {
     const folder = vscode.workspace.workspaceFolders?.[0];
     assert.ok(folder);
-    const source = new vscode.CancellationTokenSource();
-    const task = (name: string, script: string): vscode.Task => new vscode.Task(
-      { type: 'process', command: 'node', args: ['-e', script] }, folder, name, 'Make Run Tasks Tests',
-      new vscode.ProcessExecution('node', ['-e', script]), [],
-    );
-    try {
-      assert.deepEqual(await executeTaskAndWait(task('exit-zero', 'process.exit(0)'), source.token), { exitCode: 0 });
-      assert.deepEqual(await executeTaskAndWait(task('exit-two', 'process.exit(2)'), source.token), { exitCode: 2 });
-      const cancelOnStart = vscode.tasks.onDidStartTaskProcess((event) => {
-        if (event.execution.task.name === 'cancel-running') {
-          source.cancel();
-        }
-      });
-      try {
-        assert.deepEqual(await executeTaskAndWait(task('cancel-running', 'setTimeout(() => process.exit(0), 30000)'), source.token), { cancelled: true });
-      } finally {
-        cancelOnStart.dispose();
-      }
-    } finally {
-      source.dispose();
-    }
+    const document = await vscode.workspace.openTextDocument(vscode.Uri.joinPath(folder.uri, 'Makefile'));
+    const first = targetsInDocument(document)[0];
+    assert.ok(first);
+    const task = createMakeTargetsTask([first, { ...first, name: 'helper' }]);
+    assert.ok(task.execution instanceof vscode.ShellExecution);
+    assert.deepEqual(task.execution.args, ['-f', 'Makefile', 'build', 'helper']);
+    assert.equal(task.execution.options?.cwd, folder.uri.fsPath);
+    assert.equal(task.name, 'build helper');
   });
 });

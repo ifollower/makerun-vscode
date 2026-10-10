@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { runMakeTargets, type BatchMode } from './batch';
+import { runMakeTargets } from './batch';
 import { MakefileCodeLensProvider, targetsInDocument } from './codelens';
 import { MakefileDiscovery } from './discovery';
 import type { MakefileTarget } from './model';
@@ -121,7 +121,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   };
 
-  const runSelectedTargets = async (mode: BatchMode): Promise<void> => {
+  const runSelectedTargets = async (): Promise<void> => {
     if (batchRunning) {
       return;
     }
@@ -133,7 +133,7 @@ export function activate(context: vscode.ExtensionContext): void {
     updateSelection();
     try {
       const current = await prepareTargets(targets);
-      await runMakeTargets(current, mode);
+      await runMakeTargets(current);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       void vscode.window.showErrorMessage(`Make Run Tasks: ${message}`);
@@ -185,8 +185,7 @@ export function activate(context: vscode.ExtensionContext): void {
       treeProvider.clearSelection();
       updateSelection();
     }),
-    vscode.commands.registerCommand('makefileTasks.runSelectedTargetsInSequence', () => runSelectedTargets('sequence')),
-    vscode.commands.registerCommand('makefileTasks.runSelectedTargetsInParallel', () => runSelectedTargets('parallel')),
+    vscode.commands.registerCommand('makefileTasks.runSelectedTargetsInSequence', runSelectedTargets),
     vscode.commands.registerCommand('makefileTasks.runTargetWithArgs', async (argument?: TargetNode | MakefileTarget) => {
       const target = await resolveTarget(argument);
       if (!target) {

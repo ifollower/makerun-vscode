@@ -83,10 +83,7 @@ export const tasks = {
   onDidEndTask: taskEnd.event,
   executeTask: vi.fn(),
 };
-export const cancellation = new EventEmitter<void>();
-export const token = { isCancellationRequested: false, onCancellationRequested: cancellation.event };
-export const progress = { report: vi.fn() };
 export const window = {
-  withProgress: vi.fn(async (_options: unknown, callback: (progress: typeof import('./vscode-mock').progress, token: typeof import('./vscode-mock').token) => Promise<void>): Promise<void> => callback(progress, token)),
+  withProgress: vi.fn(),
   showWarningMessage: vi.fn(),
 };

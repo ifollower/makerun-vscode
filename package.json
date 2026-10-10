@@ -1,7 +1,7 @@
 {
   "name": "make-run-tasks",
   "displayName": "Make Run Tasks",
-  "description": "Run Makefile targets from the editor or task explorer, individually, in sequence, or in parallel.",
+  "description": "Run Makefile targets from the editor or task explorer, individually or in sequence.",
   "version": "1.7.6",
   "publisher": "ai-follwer",
   "license": "Apache-2.0",
@@ -63,13 +63,6 @@
       {
         "command": "makefileTasks.runSelectedTargetsInSequence",
         "title": "Run in Sequence",
-        "category": "Make Run Tasks",
-        "icon": "$(list-ordered)",
-        "enablement": "makefileTasks.hasSelection && !makefileTasks.batchRunning"
-      },
-      {
-        "command": "makefileTasks.runSelectedTargetsInParallel",
-        "title": "Run in Parallel",
         "category": "Make Run Tasks",
         "icon": "$(run-all)",
         "enablement": "makefileTasks.hasSelection && !makefileTasks.batchRunning"
@@ -151,19 +144,14 @@
           "group": "navigation@2"
         },
         {
-          "command": "makefileTasks.runSelectedTargetsInParallel",
+          "command": "makefileTasks.clearSelection",
           "when": "view == makefileTasks.targets && makefileTasks.selectionMode",
           "group": "navigation@3"
         },
         {
-          "command": "makefileTasks.clearSelection",
-          "when": "view == makefileTasks.targets && makefileTasks.selectionMode",
-          "group": "navigation@4"
-        },
-        {
           "command": "makefileTasks.refresh",
           "when": "view == makefileTasks.targets",
-          "group": "navigation@5"
+          "group": "navigation@4"
         }
       ],
       "view/item/context": [

@@ -171,7 +171,7 @@ Text entered through **Run Target with Arguments** is tokenized without applying
 
 Explorer and editor run commands MUST save dirty selected Makefiles and revalidate their documented target names before launching tasks. Failure to save or resolve any selected target MUST prevent the batch from starting.
 
-Batch execution MUST support sequential and parallel modes. Sequential mode MUST use check order, wait for each task's completion, and stop on a non-zero or unavailable exit code. Parallel mode MUST launch separate tasks with dedicated task terminals, preserving each target's workspace and working directory. Cancelling a batch MUST terminate its running tasks and skip any targets not yet launched.
+Batch execution MUST reject selections spanning different Makefiles or workspace folders before launch. It MUST launch one VS Code task with the selected target names passed as separate arguments in check order: `<make-command> -f <makefile-name> <target1> <target2> ...`. The working directory MUST be the selected Makefile's directory. The extension MUST NOT display a progress notification or track individual target completion. Make controls dependencies, failures, and execution according to its configuration; shared dependencies are updated once per invocation and parallel settings MAY affect goal execution order. Users stop execution through the task terminal or VS Code's task termination command.
 
 #### 1.3.4. Presentation
 
@@ -181,7 +181,7 @@ The categories `Build`, `Test`, `Clean`, `Rebuild`, and `Rebuild All` MUST map c
 
 A retained usage suffix MUST be shown in the target picker, explorer tooltip, generated task detail, and argument-input prompt. The description MUST remain visible in target-selection and task-detail surfaces, and the source location MUST remain available for navigation.
 
-The explorer MUST offer an explicit multi-select mode with target checkboxes and a selected count. Clicking a target in this mode MUST change selection instead of running it. Selections MUST distinguish targets by Makefile URI and name, preserve check order through refresh, and remove targets that no longer exist. Separate **Run in Sequence** and **Run in Parallel** toolbar actions MUST start the selected targets immediately without a mode picker, and MUST be disabled with no selection or while a batch is running. Leaving multi-select mode MUST clear selection and restore click-to-navigate behavior.
+The explorer MUST offer an explicit multi-select mode with target checkboxes and a selected count. Clicking a target in this mode MUST change selection instead of running it. Selections MUST distinguish targets by Makefile URI and name, preserve check order through refresh, and remove targets that no longer exist. The **Run in Sequence** toolbar action MUST use the run-all icon, start the selected targets immediately without a mode picker, and be disabled with no selection or while the launch is being prepared. Leaving multi-select mode MUST clear selection and restore click-to-navigate behavior.
 
 Outside multi-select mode, clicking a target name MUST open its Makefile definition. Single-target execution MUST use explicit inline run actions. The single-target picker MUST remain available in the Command Palette and MUST NOT appear in the explorer toolbar.
 

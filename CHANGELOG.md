@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+* Remove Run in Parallel and use its run-all icon for Run in Sequence.
+* Combine selected targets from one Makefile into a single Make invocation and show output in the task terminal without a progress notification.
+
 ## 1.7.6 (2026-10-09)
 
 ### Features

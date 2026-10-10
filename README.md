@@ -36,7 +36,7 @@ A native VS Code task explorer for documented Makefile targets.
       > Keyboard-driven target selection and execution.
 
     - Batch Execution
-      > Check multiple targets and run them in sequence or in parallel, with cancellable progress.
+      > Check multiple targets from one Makefile and run them together in a single Make invocation.
 
     - Editor Actions
       > Run documented targets directly from CodeLens links above Makefile rules.
@@ -119,10 +119,10 @@ A native VS Code task explorer for documented Makefile targets.
 ### Run multiple targets
 
 1. Open **Make Run Tasks** and click **Toggle Multi-select Mode** (the checklist icon).
-2. Check targets, or click their names, in the order you want to run them. The explorer shows the selected count and order numbers beside checked targets. Selections persist when categories are collapsed and across refreshes; targets from different Makefiles or workspace folders stay distinct.
-3. Click either toolbar action to start immediately: **Run in Sequence** (the ordered-list icon) or **Run in Parallel** (the run-all icon).
+2. Check targets from the same Makefile, or click their names, in the order you want to pass them to Make. The explorer shows the selected count and order numbers beside checked targets. Selections persist when categories are collapsed and across refreshes; targets from different Makefiles or workspace folders stay distinct.
+3. Click **Run in Sequence** (the run-all icon) in the toolbar to start immediately.
 
-Sequential execution waits for each task to finish and stops on failure or termination. Parallel execution starts each target as a separate VS Code task with its own terminal; use it for independent tasks. Both modes use each target's own Makefile directory. **Cancel** in the progress notification terminates this batch's running tasks and skips remaining targets. Selections are retained for another run; **Clear Selection** clears them, and leaving multi-select mode restores click-to-navigate behavior. Outside multi-select mode, click a target's name to open its Makefile definition, or click its inline play action to run it. The single-target picker remains available through **Make Run Tasks: Run Target…** in the Command Palette.
+The action launches one VS Code task running `make -f <Makefile> target1 target2 ...` in the selected Makefile directory. Output appears directly in the task terminal; stop it with Ctrl+C or **Tasks: Terminate Task**. There is no progress notification. Mixed Makefile selections are rejected before execution. Make handles dependencies, failures, and goal execution; its settings (including `MAKEFLAGS` and parallelism) still apply. Shared dependencies are built only once per invocation. Selections are retained for another run; **Clear Selection** clears them, and leaving multi-select mode restores click-to-navigate behavior. Outside multi-select mode, click a target's name to open its Makefile definition, or click its inline play action to run it. The single-target picker remains available through **Make Run Tasks: Run Target…** in the Command Palette.
 
 ### Run from the Makefile editor
 
