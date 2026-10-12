@@ -264,7 +264,11 @@
     "mcp:inspect": "npm run build && npx @modelcontextprotocol/inspector node dist/mcp/index.mjs",
     "watch": "tsc -p tsconfig.build.json --watch",
     "prepackage": "node -e \"require('node:fs').mkdirSync('out', { recursive: true })\"",
-    "package": "vsce package --no-dependencies --out out/"
+    "package": "vsce package --no-dependencies --out out/",
+    "marketplace:login": "vsce login ai-follwer",
+    "marketplace:preview": "node scripts/publish-marketplace.mjs --dry-run",
+    "marketplace:publish": "node scripts/publish-marketplace.mjs",
+    "marketplace:release": "npm version patch --no-git-tag-version && npm run marketplace:publish"
   },
   "dependencies": {
     "@modelcontextprotocol/server": "2.3.0",

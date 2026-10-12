@@ -572,6 +572,8 @@ VSCODE_EXTENSION_VSIX_ABS := $(abspath $(VSCODE_EXTENSION_VSIX))
 VSCODE_CLI ?= code
 NPM ?= npm
 VSCE ?= $(NPM) exec -- vsce
+VSCE_PUBLISH_ARGS ?=
+VSCE_VERSION_BUMP ?= patch
 
 # Usage: make vsce-id-check [VSCODE_EXTENSION_DIR=<dir>] [VSCODE_EXTENSION_ID=<publisher.name>]
 #
@@ -654,13 +656,47 @@ vsce-package: vsce-dependencies
 		$(VSCE) package --no-dependencies --out "$(VSCODE_EXTENSION_VSIX_ABS)"
 .PHONY: vsce-package
 
-# Usage: VSCE_PAT=<token> make vsce-publish [VSCODE_EXTENSION_DIR=<dir>] [VSCE_PUBLISH_ARGS="patch|minor|major|<version>|..."]
+# Usage: make vsce-login [VSCODE_EXTENSION_DIR=<dir>]
 #
-## Build and publish the VS Code extension to the Visual Studio Marketplace
-vsce-publish: vsce-dependencies
-	@cd "$(VSCODE_EXTENSION_DIR_ABS)" && \
-		$(VSCE) publish --no-dependencies $(VSCE_PUBLISH_ARGS)
+## Log in to Marketplace as ai-follwer and save credentials locally
+vsce-login:
+	@cd "$(VSCODE_EXTENSION_DIR_ABS)" && $(NPM) run marketplace:login
+.PHONY: vsce-login
+
+# Usage: make vsce-preview [VSCODE_EXTENSION_DIR=<dir>]
+#
+## Check, build, and package the current version without uploading to Marketplace
+vsce-preview:
+	@cd "$(VSCODE_EXTENSION_DIR_ABS)" && $(NPM) run marketplace:preview
+.PHONY: vsce-preview
+
+# Usage: make vsce-publish [VSCODE_EXTENSION_DIR=<dir>] [VSCE_PUBLISH_ARGS="--azure-credential"]
+#
+## Check, build, package, and publish the current version to Marketplace
+vsce-publish:
+	@cd "$(VSCODE_EXTENSION_DIR_ABS)" && $(NPM) run marketplace:publish -- $(VSCE_PUBLISH_ARGS)
 .PHONY: vsce-publish
+
+# Usage: make vsce-version [VSCE_VERSION_BUMP=patch|minor|major]
+#
+## Upgrade the package and lockfile version without creating a Git commit or tag
+vsce-version:
+	@cd "$(VSCODE_EXTENSION_DIR_ABS)" && $(NPM) version "$(VSCE_VERSION_BUMP)" --no-git-tag-version
+.PHONY: vsce-version
+
+# Usage: make vsce-release [VSCE_VERSION_BUMP=patch|minor|major] [VSCE_PUBLISH_ARGS="--azure-credential"]
+#
+## Upgrade the version (patch by default), then check, build, package, and publish
+vsce-release: vsce-version
+	@cd "$(VSCODE_EXTENSION_DIR_ABS)" && $(NPM) run marketplace:publish -- $(VSCE_PUBLISH_ARGS)
+.PHONY: vsce-release
+
+# Usage: make vsce-publish-azure [VSCODE_EXTENSION_DIR=<dir>]
+#
+## Publish the current version using Microsoft Entra ID / Azure credentials
+vsce-publish-azure:
+	@$(MAKE) vsce-publish VSCE_PUBLISH_ARGS="--azure-credential"
+.PHONY: vsce-publish-azure
 
 # Usage: make vsce-install [VSCODE_EXTENSION_DIR=<dir>] [VSCODE_EXTENSION_OUT=<out>] [VSCODE_EXTENSION_VSIX=<file>] [VSCODE_CLI=code]
 #

@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+* Add local Marketplace publishing commands for authentication, package preview, publishing, and patch releases.
+* Expose local publishing, version upgrades, and Azure authentication through documented Make targets.
+
 ## 1.7.8 (2026-10-10)
 
 * Run individual targets when their names are clicked; replace the inline run button with navigation to the Makefile definition and keep the argument action.

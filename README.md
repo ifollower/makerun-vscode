@@ -116,6 +116,10 @@ A native VS Code task explorer for documented Makefile targets.
       .PHONY: build
       ```
 
+### Publish from your computer
+
+Run `make vsce-login` once to authenticate publisher **ai-follwer**. Then `make vsce-publish` checks, builds, packages, and uploads the current version. Use `make vsce-preview` to build the same package without uploading, or `make vsce-release` to increment the patch version before publishing. These documented Make targets also appear in the task explorer. See [local publishing setup](docs/publishing.md) for credentials and Azure authentication; the npm commands remain available.
+
 ### Run multiple targets
 
 1. Open **Make Run Tasks** and click **Toggle Multi-select Mode** (the checklist icon).
