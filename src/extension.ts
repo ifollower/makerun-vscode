@@ -1,11 +1,17 @@
+import process from 'node:process';
 import * as vscode from 'vscode';
-import { runMakeTargets } from './batch';
 import { MakefileCodeLensProvider, targetsInDocument } from './codelens';
 import { MakefileDiscovery } from './discovery';
+import { ExecutionController, isRunActive, type ExecutionRun } from './execution';
+import { ExecutionTreeProvider, type ExecutionNode, type ExecutionRunNode } from './executionTree';
+import { formatExecutionCommands } from './executionCommands';
+import { ExecutionHistoryStore } from './executionHistory';
 import type { MakefileTarget } from './model';
 import { splitArguments } from './parser';
-import { createMakeTask, MakefileTaskProvider } from './tasks';
+import { MakefileTaskProvider } from './tasks';
 import { MakefileTreeProvider, targetFromArgument, type TargetNode } from './tree';
+
+let activeHistory: ExecutionHistoryStore | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
   const output = vscode.window.createOutputChannel('Make Run Tasks', { log: true });
@@ -18,7 +24,6 @@ export function activate(context: vscode.ExtensionContext): void {
     manageCheckboxStateManually: true,
   });
 
-  let batchRunning = false;
   const updateSelection = (): void => {
     const count = treeProvider.getDocuments().reduce((sum, document) => sum + document.targets.length, 0);
     const selected = treeProvider.getSelectedTargets().length;
@@ -27,9 +32,8 @@ export function activate(context: vscode.ExtensionContext): void {
       : count > 0 ? `${count} documented target${count === 1 ? '' : 's'}` : '';
     void vscode.commands.executeCommand('setContext', 'makefileTasks.selectionMode', treeProvider.isSelectionMode);
     void vscode.commands.executeCommand('setContext', 'makefileTasks.hasSelection', selected > 0);
-    void vscode.commands.executeCommand('setContext', 'makefileTasks.batchRunning', batchRunning);
+    void vscode.commands.executeCommand('setContext', 'makefileTasks.batchRunning', executions.batchRunning);
   };
-  updateSelection();
 
   let refreshTimer: NodeJS.Timeout | undefined;
   const refresh = async (): Promise<void> => {
@@ -105,42 +109,55 @@ export function activate(context: vscode.ExtensionContext): void {
     });
   };
 
-  const runTarget = async (argument?: TargetNode | MakefileTarget, extraArgs: readonly string[] = []): Promise<void> => {
+  const history = new ExecutionHistoryStore(context.workspaceState, (error) => output.error(`Could not save execution history: ${String(error)}`));
+  const executions = new ExecutionController(prepareTargets, undefined, history.restore());
+  history.bind(executions);
+  activeHistory = history;
+  const executionProvider = new ExecutionTreeProvider(executions);
+  const executionView = vscode.window.createTreeView('makefileTasks.execution', {
+    treeDataProvider: executionProvider,
+    showCollapseAll: true,
+  });
+  const updateExecution = (): void => {
+    const runs = executions.getRuns();
+    const active = runs.filter(isRunActive).length;
+    executionView.description = active > 0 ? `${active} active` : '';
+    executionView.badge = active > 0 ? { value: active, tooltip: `${active} active run${active === 1 ? '' : 's'}` } : undefined;
+    void vscode.commands.executeCommand('setContext', 'makefileTasks.hasCompletedExecutions', runs.some((run) => !isRunActive(run)));
+    updateSelection();
+  };
+  updateExecution();
+
+  const runTarget = async (argument?: TargetNode | MakefileTarget, extraArgs: readonly string[] = []): Promise<ExecutionRun | undefined> => {
     const target = await resolveTarget(argument);
     if (!target) {
       return;
     }
-    try {
-      const [current] = await prepareTargets([target]);
-      if (current) {
-        await vscode.tasks.executeTask(createMakeTask(current, extraArgs));
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      void vscode.window.showErrorMessage(`Make Run Tasks: ${message}`);
-    }
+    const handle = executions.startSingle(target, extraArgs);
+    await handle.completion;
+    return handle.run;
   };
 
-  const runSelectedTargets = async (): Promise<void> => {
-    if (batchRunning) {
+  const runSelectedTargets = async (): Promise<ExecutionRun | undefined> => {
+    const handle = executions.startSequence(treeProvider.getSelectedTargets());
+    if (!handle) {
       return;
     }
-    const targets = treeProvider.getSelectedTargets();
-    if (targets.length === 0) {
-      return;
+    await handle.completion;
+    return handle.run;
+  };
+
+  const runFromArgument = (argument?: ExecutionNode | string): ExecutionRun | undefined => {
+    const id = typeof argument === 'string' ? argument
+      : argument?.kind === 'run' ? argument.run.id : argument?.parent.run.id;
+    return executions.getRuns().find((run) => run.id === id);
+  };
+  const stepsFromArgument = (argument?: ExecutionNode | string): ExecutionRun['steps'] => {
+    const run = runFromArgument(argument);
+    if (typeof argument !== 'string' && argument?.kind === 'step') {
+      return run?.steps.filter((step) => step.id === argument.step.id) ?? [];
     }
-    batchRunning = true;
-    updateSelection();
-    try {
-      const current = await prepareTargets(targets);
-      await runMakeTargets(current);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      void vscode.window.showErrorMessage(`Make Run Tasks: ${message}`);
-    } finally {
-      batchRunning = false;
-      updateSelection();
-    }
+    return run?.steps ?? [];
   };
 
   context.subscriptions.push(
@@ -153,6 +170,15 @@ export function activate(context: vscode.ExtensionContext): void {
     output,
     treeView,
     treeProvider,
+    executionView,
+    executionProvider,
+    executions,
+    history,
+    executions.onDidChange(updateExecution),
+    executions.onDidStartRun((run) => {
+      void executionView.reveal(executionProvider.getRunNode(run), { expand: true, select: false, focus: false })
+        .then(undefined, (error: unknown) => output.error(`Could not reveal execution: ${String(error)}`));
+    }),
     codeLensProvider,
     vscode.languages.registerCodeLensProvider({ pattern: '**/*' }, codeLensProvider),
     vscode.tasks.registerTaskProvider('makefileTarget', new MakefileTaskProvider(() => treeProvider.getDocuments())),
@@ -186,6 +212,56 @@ export function activate(context: vscode.ExtensionContext): void {
       updateSelection();
     }),
     vscode.commands.registerCommand('makefileTasks.runSelectedTargetsInSequence', runSelectedTargets),
+    vscode.commands.registerCommand('makefileTasks.cancelExecution', (argument?: ExecutionRunNode | string) => {
+      if (argument) {
+        executions.cancelRun(typeof argument === 'string' ? argument : argument.run.id);
+      }
+    }),
+    vscode.commands.registerCommand('makefileTasks.clearExecutionHistory', () => executions.clearCompleted()),
+    vscode.commands.registerCommand('makefileTasks.rerunExecution', async (argument?: ExecutionRunNode | string) => {
+      const run = runFromArgument(argument);
+      const handle = run && executions.rerun(run.id);
+      if (handle) {
+        await handle.completion;
+        return handle.run;
+      }
+      return undefined;
+    }),
+    vscode.commands.registerCommand('makefileTasks.deleteExecution', (argument?: ExecutionRunNode | string) => {
+      const run = runFromArgument(argument);
+      return run ? executions.deleteRun(run.id) : false;
+    }),
+    vscode.commands.registerCommand('makefileTasks.copyExecutionCommands', async (argument?: ExecutionNode | string) => {
+      const steps = stepsFromArgument(argument);
+      if (steps.length > 0) {
+        await vscode.env.clipboard.writeText(formatExecutionCommands(steps, process.platform === 'win32'));
+      }
+    }),
+    vscode.commands.registerCommand('makefileTasks.showExecutionCommands', async (argument?: ExecutionNode | string) => {
+      const steps = stepsFromArgument(argument);
+      if (steps.length > 0) {
+        const windows = process.platform === 'win32';
+        const details = steps.map((step) => `# ${step.target.name}: ${step.status}${step.exitCode === undefined ? '' : ` (exit ${step.exitCode})`}${step.error ? `\n# ${step.error.replaceAll('\n', '\n# ')}` : ''}`).join('\n');
+        const document = await vscode.workspace.openTextDocument({
+          content: `${details}\n\n${formatExecutionCommands(steps, windows)}\n`,
+          language: windows ? 'powershell' : 'shellscript',
+        });
+        await vscode.window.showTextDocument(document, { preview: true });
+      }
+    }),
+    vscode.commands.registerCommand('makefileTasks.openExecutionTarget', async (argument?: ExecutionNode | string) => {
+      const steps = stepsFromArgument(argument);
+      const step = steps.length === 1 ? steps[0] : steps.length > 1
+        ? (await vscode.window.showQuickPick(steps.map((entry) => ({
+          label: entry.target.name,
+          description: `${entry.target.workspaceFolder.name}/${entry.target.makefileRelativePath}`,
+          step: entry,
+        })), { title: 'Go to Makefile Target', matchOnDescription: true }))?.step
+        : undefined;
+      if (step) {
+        await vscode.commands.executeCommand('makefileTasks.openTarget', step.target);
+      }
+    }),
     vscode.commands.registerCommand('makefileTasks.runTargetWithArgs', async (argument?: TargetNode | MakefileTarget) => {
       const target = await resolveTarget(argument);
       if (!target) {
@@ -196,15 +272,23 @@ export function activate(context: vscode.ExtensionContext): void {
         title: `Run make ${target.name}`,
         prompt: usage ? `Usage: ${usage}` : 'Additional make arguments or variable assignments',
         placeHolder: target.usage ?? 'FILE=path/to/file ENV=development --jobs 4',
+        validateInput: (value) => {
+          try {
+            splitArguments(value);
+            return undefined;
+          } catch (error) {
+            return error instanceof Error ? error.message : String(error);
+          }
+        },
       });
       if (input === undefined) {
         return;
       }
       try {
-        await runTarget(target, splitArguments(input));
+        return await runTarget(target, splitArguments(input));
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        void vscode.window.showErrorMessage(`Make Run Tasks: ${message}`);
+        output.error(`Invalid task arguments: ${message}`);
       }
     }),
     vscode.commands.registerCommand('makefileTasks.openTarget', async (argument?: TargetNode | MakefileTarget) => {
@@ -243,4 +327,7 @@ export function activate(context: vscode.ExtensionContext): void {
   void refresh();
 }
 
-export function deactivate(): void {}
+export async function deactivate(): Promise<void> {
+  await activeHistory?.flush();
+  activeHistory = undefined;
+}

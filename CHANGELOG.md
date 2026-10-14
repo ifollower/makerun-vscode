@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+* Allow new sequences and in-place reruns of ended sequences while other runs are active, keeping ordering and cancellation independent per run.
+
+* Preserve Execution history across window reloads in workspace storage; restore unfinished runs as interrupted without resuming tasks.
+* Add in-place rerun and per-record deletion to Execution history, sorting reruns by their latest start time.
+* Add command inspection, safe command copying, and navigation to Makefile definitions from run history.
+
+## 1.7.9 (2026-10-12)
+
+* Restore extension-managed sequential execution across Makefiles and workspace folders, with independent single runs and cancellation.
+* Add a persistent Execution sidebar view for all extension run actions, per-task progress, failure details, and recent results without notification popups.
 * Add local Marketplace publishing commands for authentication, package preview, publishing, and patch releases.
 * Expose local publishing, version upgrades, and Azure authentication through documented Make targets.
 

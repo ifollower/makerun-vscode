@@ -6,6 +6,20 @@ function makefileDirectory(uri: vscode.Uri): string {
   return path.dirname(uri.fsPath);
 }
 
+export interface MakeTaskCommand {
+  readonly executable: string;
+  readonly args: readonly string[];
+  readonly cwd: string;
+}
+
+export function getMakeTaskCommand(target: MakefileTarget, extraArgs: readonly string[] = []): MakeTaskCommand {
+  return {
+    executable: vscode.workspace.getConfiguration('makefileTasks').get<string>('makeCommand', 'make'),
+    args: ['-f', path.basename(target.makefileUri.fsPath), target.name, ...extraArgs],
+    cwd: makefileDirectory(target.makefileUri),
+  };
+}
+
 function taskGroupForCategory(category: string | undefined): vscode.TaskGroup | undefined {
   switch (category?.trim().toLowerCase()) {
     case 'build':
@@ -22,19 +36,19 @@ function taskGroupForCategory(category: string | undefined): vscode.TaskGroup | 
   }
 }
 
-export function createMakeTask(target: MakefileTarget, extraArgs: readonly string[] = []): vscode.Task {
+export function createMakeTask(target: MakefileTarget, extraArgs: readonly string[] = [], executionId?: string): vscode.Task {
   const definition: MakefileTaskDefinition = {
     type: 'makefileTarget',
     target: target.name,
     makefile: target.makefileRelativePath,
     ...(extraArgs.length > 0 ? { args: extraArgs } : {}),
+    ...(executionId ? { executionId } : {}),
   };
-  const command = vscode.workspace.getConfiguration('makefileTasks').get<string>('makeCommand', 'make');
-  const makefileName = path.basename(target.makefileUri.fsPath);
+  const command = getMakeTaskCommand(target, extraArgs);
   const execution = new vscode.ShellExecution(
-    command,
-    ['-f', makefileName, target.name, ...extraArgs],
-    { cwd: makefileDirectory(target.makefileUri) },
+    command.executable,
+    [...command.args],
+    { cwd: command.cwd },
   );
   const task = new vscode.Task(
     definition,
@@ -92,6 +106,6 @@ export class MakefileTaskProvider implements vscode.TaskProvider {
       return undefined;
     }
 
-    return createMakeTask(matchingTarget, definition.args ?? []);
+    return createMakeTask(matchingTarget, definition.args ?? [], definition.executionId);
   }
 }

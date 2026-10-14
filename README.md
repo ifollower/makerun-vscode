@@ -36,7 +36,7 @@ A native VS Code task explorer for documented Makefile targets.
       > Keyboard-driven target selection and execution.
 
     - Batch Execution
-      > Check multiple targets from one Makefile and run them together in a single Make invocation.
+      > Check targets across Makefiles, run them sequentially, and follow progress in the fixed Execution view.
 
     - Editor Actions
       > Run documented targets directly from CodeLens links above Makefile rules.
@@ -123,10 +123,26 @@ Run `make vsce-login` once to authenticate publisher **ai-follwer**. Then `make 
 ### Run multiple targets
 
 1. Open **Make Run Tasks** and click **Toggle Multi-select Mode** (the checklist icon).
-2. Check targets from the same Makefile, or click their names, in the order you want to pass them to Make. The explorer shows the selected count and order numbers beside checked targets. Selections persist when categories are collapsed and across refreshes; targets from different Makefiles or workspace folders stay distinct.
+2. Check targets, or click their names, in execution order. Targets can come from different Makefiles or workspace folders. The explorer shows the selected count and order numbers beside checked targets. Selections persist when categories are collapsed and across refreshes.
 3. Click **Run in Sequence** (the run-all icon) in the toolbar to start immediately.
 
-The action launches one VS Code task running `make -f <Makefile> target1 target2 ...` in the selected Makefile directory. Output appears directly in the task terminal; stop it with Ctrl+C or **Tasks: Terminate Task**. There is no progress notification. Mixed Makefile selections are rejected before execution. Make handles dependencies, failures, and goal execution; its settings (including `MAKEFLAGS` and parallelism) still apply. Shared dependencies are built only once per invocation. Selections are retained for another run; **Clear Selection** clears them, and leaving multi-select mode restores click-to-run behavior. Outside multi-select mode, click a target's name to run it directly. The inline **Run Target with Arguments** action opens the argument input, and **Go to Target Definition** opens its Makefile at the target's rule. The navigation action is also available in multi-select mode. The single-target picker remains available through **Make Run Tasks: Run Target…** in the Command Palette.
+The extension launches a separate `make -f <Makefile> <target>` task for each selection, waits for it to finish, then starts the next. Each task uses its own Makefile directory and workspace scope. A failed or terminated task stops the batch; remaining targets are skipped. Separate Make invocations can run shared dependencies again. Make's own settings still control execution inside each individual task.
+
+Selections are retained for another run; **Clear Selection** clears them, and leaving multi-select mode restores click-to-run behavior. Outside multi-select mode, click a target's name to run it directly. The inline **Run Target with Arguments** action opens the argument input, and **Go to Target Definition** opens its Makefile at the target's rule. The navigation action is also available in multi-select mode. The single-target picker remains available through **Make Run Tasks: Run Target…** in the Command Palette.
+
+### Execution status
+
+The **Execution** view below **Targets** displays every run started by the extension: normal clicks, argument actions, the target picker, editor CodeLens, and sequential batches. Each run keeps its original selection and arguments, displays waiting/running/succeeded/failed/cancelled/skipped steps, and shows the completed count, current target, and failure details. It does not estimate progress inside a Make recipe or show progress/result notifications. Detailed output remains in task terminals.
+
+Use the stop action beside an active run to cancel only that run. Cancelling a sequence terminates its current task and skips the queue. Stopping the task from the terminal also stops the sequence. Existing runs do not block new runs or reruns of other records. Multiple batches can run independently; targets within each batch still run one at a time in their selected order.
+
+New runs expand without taking editor focus. The native views can be collapsed and resized independently. All active runs and the ten most recently started completed runs are retained, newest first. History is saved in VS Code's local workspace storage, including targets, arguments, command snapshots and results, so reloading the window or reopening the same workspace restores it. **Clear Completed Runs** leaves active runs intact and updates stored history; deleted records do not return after reload. Histories from different workspaces stay separate. Tasks launched directly through VS Code's native task commands or an external terminal are not tracked.
+
+Runs that were still preparing or running when the window reloaded are restored as **Interrupted**, with queued steps skipped. The extension cannot infer their final result or resume their queue automatically; tasks might still exist in VS Code terminals. Completed steps retain their results, and interrupted records can be rerun or deleted. Restored history keeps the latest ten records. Terminal output itself is managed by VS Code and is not copied into history storage.
+
+Completed records offer **Rerun** and **Delete Run** beside their names and in the context menu. Rerun resets the existing record, updates its start time, and moves it to the top without adding another history entry. It preserves target order and arguments, saves and revalidates the current Makefiles, and uses the current Make executable settings. A sequence restarts from the first target, including previously skipped targets. Active records cannot be rerun or deleted. Ended records, including failed batches, can be rerun independently while other runs remain active.
+
+Right-click a run or step for **Show Commands**, **Copy Commands**, or **Go to Target Definition**. Steps also have an inline navigation action. Batch navigation asks which target to open. Command inspection shows statuses and the command's working directory, executable and arguments; launched steps retain the actual command snapshot, while waiting or skipped steps show the planned invocation. Copying a batch includes all steps in order and stops on failure. Copied commands use PowerShell syntax on Windows and POSIX shell syntax elsewhere. These inspection actions do not execute tasks. Delete Run removes only that completed record from the view and saved history.
 
 ### Run from the Makefile editor
 

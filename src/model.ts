@@ -26,4 +26,5 @@ export interface MakefileTaskDefinition extends vscode.TaskDefinition {
   readonly target: string;
   readonly makefile?: string;
   readonly args?: readonly string[];
+  readonly executionId?: string;
 }

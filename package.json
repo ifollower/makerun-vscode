@@ -2,7 +2,7 @@
   "name": "make-run-tasks",
   "displayName": "Make Run Tasks",
   "description": "Run Makefile targets from the editor or task explorer, individually or in sequence.",
-  "version": "1.7.8",
+  "version": "1.7.9",
   "publisher": "ai-follwer",
   "license": "Apache-2.0",
   "icon": "assets/icon.png",
@@ -55,6 +55,49 @@
   "contributes": {
     "commands": [
       {
+        "command": "makefileTasks.rerunExecution",
+        "title": "Rerun",
+        "category": "Make Run Tasks",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "makefileTasks.deleteExecution",
+        "title": "Delete Run",
+        "category": "Make Run Tasks",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "makefileTasks.copyExecutionCommands",
+        "title": "Copy Commands",
+        "category": "Make Run Tasks",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "makefileTasks.showExecutionCommands",
+        "title": "Show Commands",
+        "category": "Make Run Tasks",
+        "icon": "$(terminal)"
+      },
+      {
+        "command": "makefileTasks.openExecutionTarget",
+        "title": "Go to Target Definition",
+        "category": "Make Run Tasks",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "makefileTasks.cancelExecution",
+        "title": "Cancel Run",
+        "category": "Make Run Tasks",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "makefileTasks.clearExecutionHistory",
+        "title": "Clear Completed Runs",
+        "category": "Make Run Tasks",
+        "icon": "$(clear-all)",
+        "enablement": "makefileTasks.hasCompletedExecutions"
+      },
+      {
         "command": "makefileTasks.toggleSelectionMode",
         "title": "Toggle Multi-select Mode",
         "category": "Make Run Tasks",
@@ -65,7 +108,7 @@
         "title": "Run in Sequence",
         "category": "Make Run Tasks",
         "icon": "$(run-all)",
-        "enablement": "makefileTasks.hasSelection && !makefileTasks.batchRunning"
+        "enablement": "makefileTasks.hasSelection"
       },
       {
         "command": "makefileTasks.clearSelection",
@@ -121,10 +164,20 @@
           "name": "Targets",
           "icon": "assets/makefile.svg",
           "contextualTitle": "Make Run Tasks"
+        },
+        {
+          "id": "makefileTasks.execution",
+          "name": "Execution",
+          "contextualTitle": "Make Run Tasks",
+          "visibility": "visible"
         }
       ]
     },
     "viewsWelcome": [
+      {
+        "view": "makefileTasks.execution",
+        "contents": "Run a target or select multiple targets to see their execution status here."
+      },
       {
         "view": "makefileTasks.targets",
         "contents": "No documented Makefile targets were found. Add a `##` description immediately before a target, or use `target: ## description`.\n[Refresh](command:makefileTasks.refresh)",
@@ -132,7 +185,23 @@
       }
     ],
     "menus": {
+      "commandPalette": [
+        { "command": "makefileTasks.rerunExecution", "when": "false" },
+        { "command": "makefileTasks.deleteExecution", "when": "false" },
+        { "command": "makefileTasks.copyExecutionCommands", "when": "false" },
+        { "command": "makefileTasks.showExecutionCommands", "when": "false" },
+        { "command": "makefileTasks.openExecutionTarget", "when": "false" },
+        {
+          "command": "makefileTasks.cancelExecution",
+          "when": "false"
+        }
+      ],
       "view/title": [
+        {
+          "command": "makefileTasks.clearExecutionHistory",
+          "when": "view == makefileTasks.execution",
+          "group": "navigation@1"
+        },
         {
           "command": "makefileTasks.toggleSelectionMode",
           "when": "view == makefileTasks.targets && (makefileTasks.hasTargets || makefileTasks.selectionMode)",
@@ -155,6 +224,56 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "makefileTasks.rerunExecution",
+          "when": "view == makefileTasks.execution && viewItem =~ /^executionCompleted/",
+          "group": "inline@1"
+        },
+        {
+          "command": "makefileTasks.deleteExecution",
+          "when": "view == makefileTasks.execution && viewItem =~ /^executionCompleted/",
+          "group": "inline@2"
+        },
+        {
+          "command": "makefileTasks.openExecutionTarget",
+          "when": "view == makefileTasks.execution && viewItem == executionStep",
+          "group": "inline@1"
+        },
+        {
+          "command": "makefileTasks.rerunExecution",
+          "when": "view == makefileTasks.execution && viewItem =~ /^executionCompleted/",
+          "group": "run@1"
+        },
+        {
+          "command": "makefileTasks.deleteExecution",
+          "when": "view == makefileTasks.execution && viewItem =~ /^executionCompleted/",
+          "group": "run@2"
+        },
+        {
+          "command": "makefileTasks.cancelExecution",
+          "when": "view == makefileTasks.execution && viewItem == executionActive",
+          "group": "run@1"
+        },
+        {
+          "command": "makefileTasks.openExecutionTarget",
+          "when": "view == makefileTasks.execution && viewItem =~ /^execution/",
+          "group": "navigation@1"
+        },
+        {
+          "command": "makefileTasks.showExecutionCommands",
+          "when": "view == makefileTasks.execution && viewItem =~ /^execution/",
+          "group": "inspect@1"
+        },
+        {
+          "command": "makefileTasks.copyExecutionCommands",
+          "when": "view == makefileTasks.execution && viewItem =~ /^execution/",
+          "group": "inspect@2"
+        },
+        {
+          "command": "makefileTasks.cancelExecution",
+          "when": "view == makefileTasks.execution && viewItem == executionActive",
+          "group": "inline@1"
+        },
         {
           "command": "makefileTasks.runTargetWithArgs",
           "when": "view == makefileTasks.targets && viewItem == makefileTarget && !makefileTasks.selectionMode",
@@ -229,6 +348,10 @@
           "target"
         ],
         "properties": {
+          "executionId": {
+            "type": "string",
+            "description": "Internal identifier for an extension-managed execution."
+          },
           "target": {
             "type": "string",
             "description": "Make target to execute."
