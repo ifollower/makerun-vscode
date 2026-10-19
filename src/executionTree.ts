@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { ExecutionController, isRunActive, type ExecutionRun, type ExecutionStep } from './execution';
+import { ExecutionController, getResumeIndex, isRunActive, type ExecutionRun, type ExecutionStep } from './execution';
 
 export interface ExecutionRunNode {
   readonly kind: 'run';
@@ -49,8 +49,10 @@ export class ExecutionTreeProvider implements vscode.TreeDataProvider<ExecutionN
       node = { kind: 'run', run };
       this.roots.set(run.id, node);
     }
-    if (this.children.get(run.id)?.[0]?.step !== run.steps[0]) {
-      this.children.set(run.id, run.steps.map((step) => ({ kind: 'step', step, parent: node! })));
+    const children = this.children.get(run.id);
+    if (children?.length !== run.steps.length || run.steps.some((step, index) => children?.[index]?.step !== step)) {
+      this.children.set(run.id, run.steps.map((step, index) => children?.[index]?.step === step
+        ? children[index]! : { kind: 'step', step, parent: node! }));
     }
     return node;
   }
@@ -80,6 +82,7 @@ export class ExecutionTreeProvider implements vscode.TreeDataProvider<ExecutionN
         isRunActive(run) ? vscode.TreeItemCollapsibleState.Expanded : vscode.TreeItemCollapsibleState.Collapsed);
       item.id = run.id;
       item.contextValue = isRunActive(run) ? 'executionActive'
+        : getResumeIndex(run) !== undefined ? 'executionCompletedResumable'
         : run.kind === 'sequence' ? 'executionCompletedSequence' : 'executionCompleted';
       item.iconPath = new vscode.ThemeIcon(icons[run.status]);
       item.description = `${completed}/${run.steps.length} completed · ${labels[run.status]}${current ? ` ${current.target.name}` : ''} · ${time}`;

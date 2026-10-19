@@ -148,6 +148,76 @@ describe('persistent execution history', () => {
     firstWorkspace.store.dispose();
   });
 
+  it('resumes saved failures in place and restores successful results without changing the history schema', async () => {
+    mock.tasks.executeTask.mockImplementation(async (task: vscode.Task): Promise<vscode.TaskExecution> => {
+      const execution = { task, terminate: vi.fn() };
+      mock.processEnd.fire({ execution, exitCode: task.name === 'build' ? 2 : 0 });
+      return execution;
+    });
+    const controller = runner();
+    const { store, state } = memoryStore();
+    store.bind(controller);
+    const original = controller.startSequence([target('clean'), target('build'), target('test')])!;
+    await original.completion;
+    await controller.startSingle(target('lint')).completion;
+    await store.flush();
+    store.dispose();
+    const reloadedStore = memoryStore(state).store;
+    const restored = runner(reloadedStore.restore());
+    reloadedStore.bind(restored);
+    const saved = restored.getRuns().find((run) => run.id === original.run.id)!;
+    const prefix = saved.steps[0]!;
+    expect(saved.status).toBe('failed');
+    const tree = new ExecutionTreeProvider(restored);
+    expect(tree.getTreeItem(tree.getRunNode(saved)).contextValue).toBe('executionCompletedResumable');
+    const invocations = mock.tasks.executeTask.mock.calls.length;
+    mock.tasks.executeTask.mockImplementation(async (task: vscode.Task): Promise<vscode.TaskExecution> => {
+      const execution = { task, terminate: vi.fn() };
+      mock.processEnd.fire({ execution, exitCode: 0 });
+      return execution;
+    });
+    const resumed = restored.resume(saved.id)!;
+    await resumed.completion;
+    await reloadedStore.flush();
+    expect(mock.tasks.executeTask.mock.calls.slice(invocations).map(([task]) => task.name)).toEqual(['build', 'test']);
+    expect(saved.steps[0]).toBe(prefix);
+    expect(saved.status).toBe('succeeded');
+    const loaded = memoryStore(state).store.restore();
+    expect(loaded).toHaveLength(2);
+    expect(loaded[0]!.id).toBe(original.run.id);
+    expect(loaded[0]!.steps[0]).toEqual(prefix);
+    expect(loaded[0]!.steps.map((step) => step.status)).toEqual(['succeeded', 'succeeded', 'succeeded']);
+    expect(loaded[0]!.startedAt).toBe(saved.startedAt);
+    expect((state.get(EXECUTION_HISTORY_KEY) as { version: number }).version).toBe(1);
+    tree.dispose();
+    reloadedStore.dispose();
+  });
+
+  it('restores an unfinished resume as interrupted while retaining its completed prefix', async () => {
+    mock.tasks.executeTask.mockImplementation(async (task: vscode.Task): Promise<vscode.TaskExecution> => {
+      const execution = { task, terminate: vi.fn() };
+      mock.processEnd.fire({ execution, exitCode: task.name === 'build' ? 2 : 0 });
+      return execution;
+    });
+    const controller = runner();
+    const original = controller.startSequence([target('clean'), target('build'), target('test')])!;
+    await original.completion;
+    let execution!: vscode.TaskExecution;
+    mock.tasks.executeTask.mockImplementation(async (task: vscode.Task): Promise<vscode.TaskExecution> => {
+      execution = { task, terminate: vi.fn() };
+      return execution;
+    });
+    const resumed = controller.resume(original.run.id)!;
+    await vi.waitFor(() => expect(execution).toBeDefined());
+    const loaded = restoreExecutionHistory(serializeExecutionHistory(controller.getRuns()));
+    expect(loaded[0]!.status).toBe('interrupted');
+    expect(loaded[0]!.steps.map((step) => step.status)).toEqual(['succeeded', 'interrupted', 'skipped']);
+    const restored = runner(loaded);
+    expect(restored.resume(original.run.id)).toBeUndefined();
+    controller.cancelRun(original.run.id);
+    await resumed.completion;
+  });
+
   it('ignores corrupt entries without truncating a batch into a different replay', async () => {
     const controller = runner();
     const handle = controller.startSingle(target('build'));

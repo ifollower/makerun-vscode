@@ -180,6 +180,56 @@ describe('extension execution entry points', () => {
     expect(await mock.commands.executeCommand('makefileTasks.rerunExecution', root)).toBeUndefined();
   });
 
+  it('resumes only remaining targets from the failure action and expands the same record', async () => {
+    const clean = { ...build, name: 'clean' };
+    const test = { ...build, name: 'test' };
+    const targets = mock.views.get('makefileTasks.targets')!.provider as MakefileTreeProvider;
+    targets.setDocuments([{
+      uri: build.makefileUri, workspaceFolder: build.workspaceFolder, relativePath: 'Makefile', targets: [clean, build, test],
+    }]);
+    mock.workspace.openTextDocument.mockResolvedValue({
+      uri: build.makefileUri, isDirty: false, getText: (): string => '## Clean\nclean:\n## Build\nbuild:\n## Test\ntest:\n',
+    });
+    await mock.commands.executeCommand('makefileTasks.toggleSelectionMode');
+    for (const target of [clean, build, test]) {
+      await mock.commands.executeCommand('makefileTasks.toggleTargetSelection', { kind: 'target', target });
+    }
+    const running = mock.commands.executeCommand('makefileTasks.runSelectedTargetsInSequence');
+    await vi.waitFor(() => expect(launched).toHaveLength(1));
+    end(0);
+    await vi.waitFor(() => expect(launched).toHaveLength(2));
+    mock.processEnd.fire({ execution: launched[1], exitCode: 2 });
+    const original = await running as ExecutionRun;
+    const tree = executionView().provider as ExecutionTreeProvider;
+    const root = tree.getChildren()[0]!;
+    expect(tree.getTreeItem(root).contextValue).toBe('executionCompletedResumable');
+    const prefix = original.steps[0];
+    // Removing a successful target must not prevent preparing the remaining targets.
+    const save = vi.fn(async () => true);
+    mock.workspace.openTextDocument.mockResolvedValue({
+      uri: build.makefileUri, isDirty: true, save, getText: (): string => '## Build\nbuild:\n## Test\ntest:\n',
+    });
+    const resumed = mock.commands.executeCommand('makefileTasks.resumeExecution', root);
+    expect(await mock.commands.executeCommand('makefileTasks.resumeExecution', root)).toBeUndefined();
+    await vi.waitFor(() => expect(launched).toHaveLength(3));
+    expect(save).toHaveBeenCalledOnce();
+    expect(original.steps[0]).toBe(prefix);
+    expect(tree.getTreeItem(root).description).toContain('1/3 completed');
+    end(2);
+    await vi.waitFor(() => expect(launched).toHaveLength(4));
+    end(3);
+    expect((await resumed as ExecutionRun).id).toBe(original.id);
+    expect(original.status).toBe('succeeded');
+    expect(launched.slice(2).map((execution) => execution.task.name)).toEqual(['build', 'test']);
+    expect(tree.getChildren()).toEqual([root]);
+    expect(executionView().reveal).toHaveBeenLastCalledWith(root, { expand: true, select: false, focus: false });
+    expect(await mock.commands.executeCommand('makefileTasks.resumeExecution', root)).toBeUndefined();
+    await mock.commands.executeCommand('makefileTasks.deleteExecution', root);
+    expect(await mock.commands.executeCommand('makefileTasks.resumeExecution', root)).toBeUndefined();
+    expect(mock.window.withProgress).not.toHaveBeenCalled();
+    expect(mock.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+
   it('inspects, copies and navigates from recorded steps without starting tasks', async () => {
     const running = mock.commands.executeCommand('makefileTasks.runTarget', build);
     await vi.waitFor(() => expect(launched).toHaveLength(1));

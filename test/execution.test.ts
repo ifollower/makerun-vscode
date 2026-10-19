@@ -2,7 +2,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as vscode from 'vscode';
 import { executeTaskAndWait } from '../src/batch';
-import { ExecutionController } from '../src/execution';
+import { ExecutionController, getResumeIndex, type ExecutionRun } from '../src/execution';
 import { ExecutionTreeProvider } from '../src/executionTree';
 import { formatExecutionCommands } from '../src/executionCommands';
 import type { MakefileTarget } from '../src/model';
@@ -379,6 +379,169 @@ describe('execution controller', () => {
   });
 });
 
+describe('resuming failed runs', () => {
+  it('preserves successful steps, refreshes remaining nodes and resumes again from a later failure', async () => {
+    const prepare = vi.fn(async (targets: readonly MakefileTarget[]) => targets);
+    const runner = controller(prepare);
+    const tree = new ExecutionTreeProvider(runner);
+    const otherFolder = { ...mock.folder, uri: mock.Uri.file(path.resolve('resume-workspace')) } as vscode.WorkspaceFolder;
+    const build = { ...target('build', 'nested/Makefile'), workspaceFolder: otherFolder,
+      makefileUri: mock.Uri.file(path.join(otherFolder.uri.fsPath, 'nested/Makefile')) as vscode.Uri };
+    const original = runner.startSequence([target('clean'), build, target('test')])!;
+    const root = tree.getRunNode(original.run);
+    const oldChildren = tree.getChildren(root);
+    await vi.waitFor(() => expect(launched).toHaveLength(1));
+    end(0);
+    await vi.waitFor(() => expect(launched).toHaveLength(2));
+    end(1, 2);
+    await original.completion;
+    const prefix = original.run.steps[0]!;
+    const prefixSnapshot = { ...prefix, command: { ...prefix.command, args: [...prefix.command.args] } };
+    const failedStep = original.run.steps[1]!;
+    const timestamp = original.run.startedAt;
+    expect(tree.getTreeItem(root).contextValue).toBe('executionCompletedResumable');
+    const newer = runner.startSingle(target('lint'));
+    await vi.waitFor(() => expect(launched).toHaveLength(3));
+    end(2);
+    await newer.completion;
+    mock.settings.set('makeCommand', 'gmake');
+    const resumed = runner.resume(original.run.id)!;
+    expect(resumed.run).toBe(original.run);
+    expect(runner.getRuns()).toEqual([original.run, newer.run]);
+    expect(original.run.startedAt).toBeGreaterThan(timestamp);
+    expect(original.run.error).toBeUndefined();
+    expect(original.run.steps[0]).toBe(prefix);
+    expect(prefix).toEqual(prefixSnapshot);
+    expect(original.run.steps[1]!.id).not.toBe(failedStep.id);
+    expect(original.run.steps[1]!.exitCode).toBeUndefined();
+    expect(original.run.steps[1]!.error).toBeUndefined();
+    expect(original.run.steps.map((step) => step.status)).toEqual(['succeeded', 'waiting', 'waiting']);
+    expect(runner.resume(original.run.id)).toBeUndefined();
+    const children = tree.getChildren(root);
+    expect(children[0]).toBe(oldChildren[0]);
+    expect(children[1]).not.toBe(oldChildren[1]);
+    expect(children[2]).not.toBe(oldChildren[2]);
+    expect(tree.getTreeItem(root).description).toContain('1/3 completed');
+    expect(tree.getTreeItem(root).contextValue).toBe('executionActive');
+    await vi.waitFor(() => expect(launched).toHaveLength(4));
+    expect(prepare).toHaveBeenLastCalledWith([build, original.run.steps[2]!.target]);
+    expect(launched[3]!.task.scope).toBe(otherFolder);
+    expect((launched[3]!.task.execution as unknown as mock.ShellExecution).options.cwd).toBe(path.dirname(build.makefileUri.fsPath));
+    expect(original.run.steps[1]!.command.executable).toBe('gmake');
+    expect(prefix.command.executable).toBe('make');
+    mock.processEnd.fire({ execution: launched[1], exitCode: 9 });
+    expect(original.run.status).toBe('running');
+    end(3);
+    await vi.waitFor(() => expect(launched).toHaveLength(5));
+    end(4, 3);
+    await resumed.completion;
+    expect(getResumeIndex(original.run)).toBe(2);
+    const secondPrefix = original.run.steps[1];
+    const last = runner.resume(original.run.id)!;
+    await vi.waitFor(() => expect(launched).toHaveLength(6));
+    expect(prepare).toHaveBeenLastCalledWith([original.run.steps[2]!.target]);
+    expect(original.run.steps[1]).toBe(secondPrefix);
+    end(5);
+    await last.completion;
+    expect(original.run.status).toBe('succeeded');
+    expect(prefix).toEqual(prefixSnapshot);
+    expect(launched.slice(3).map((execution) => execution.task.name)).toEqual(['build', 'test', 'test']);
+    expect(runner.getRuns()).toHaveLength(2);
+    tree.dispose();
+  });
+
+  it('resumes a failed single target with its original arguments and handles a launch failure', async () => {
+    mock.tasks.executeTask.mockRejectedValueOnce(new Error('Could not launch make'));
+    const runner = controller();
+    const original = runner.startSingle(target('build'), ['MODE=fast build']);
+    await original.completion;
+    expect(original.run.status).toBe('failed');
+    const resumed = runner.resume(original.run.id)!;
+    await vi.waitFor(() => expect(launched).toHaveLength(1));
+    expect((launched[0]!.task.execution as unknown as mock.ShellExecution).args).toEqual(['-f', 'Makefile', 'build', 'MODE=fast build']);
+    end(0);
+    await resumed.completion;
+    expect(original.run.status).toBe('succeeded');
+    expect(runner.getRuns()).toEqual([original.run]);
+  });
+
+  it('retries preparation from the first incomplete step without revalidating a successful prefix', async () => {
+    const prepare = vi.fn(async (targets: readonly MakefileTarget[]) => targets);
+    prepare.mockRejectedValueOnce(new Error('Cannot save Makefile'));
+    const runner = controller(prepare);
+    const original = runner.startSequence([target('clean'), target('build'), target('test')])!;
+    await original.completion;
+    expect(original.run.steps.map((step) => step.status)).toEqual(['skipped', 'skipped', 'skipped']);
+    expect(launched).toHaveLength(0);
+    const retry = runner.resume(original.run.id)!;
+    await vi.waitFor(() => expect(launched).toHaveLength(1));
+    end(0);
+    await vi.waitFor(() => expect(launched).toHaveLength(2));
+    end(1, 2);
+    await retry.completion;
+    const prefix = original.run.steps[0];
+    prepare.mockRejectedValueOnce(new Error('Remaining target removed'));
+    await runner.resume(original.run.id)!.completion;
+    expect(prepare.mock.lastCall![0].map((goal) => goal.name)).toEqual(['build', 'test']);
+    expect(original.run.steps[0]).toBe(prefix);
+    expect(original.run.steps.map((step) => step.status)).toEqual(['succeeded', 'skipped', 'skipped']);
+    expect(original.run.error).toBe('Remaining target removed');
+    expect(launched).toHaveLength(2);
+    expect(getResumeIndex(original.run)).toBe(1);
+  });
+
+  it('cancels only the resumed run and skips its queue while another sequence continues', async () => {
+    const runner = controller();
+    const original = runner.startSequence([target('clean'), target('build'), target('test')])!;
+    await vi.waitFor(() => expect(launched).toHaveLength(1));
+    end(0);
+    await vi.waitFor(() => expect(launched).toHaveLength(2));
+    end(1, 2);
+    await original.completion;
+    const independent = runner.startSequence([target('lint')])!;
+    await vi.waitFor(() => expect(launched).toHaveLength(3));
+    const resumed = runner.resume(original.run.id)!;
+    await vi.waitFor(() => expect(launched).toHaveLength(4));
+    runner.cancelRun(original.run.id);
+    await resumed.completion;
+    expect(original.run.steps.map((step) => step.status)).toEqual(['succeeded', 'cancelled', 'skipped']);
+    expect(launched[3]!.terminate).toHaveBeenCalledOnce();
+    expect(launched[2]!.terminate).not.toHaveBeenCalled();
+    expect(independent.run.status).toBe('running');
+    end(2);
+    await independent.completion;
+    expect(independent.run.status).toBe('succeeded');
+  });
+
+  it.each(['preparing', 'running', 'succeeded', 'cancelled', 'interrupted'] as const)('does not offer resume for a %s record', (status) => {
+    const runner = controller();
+    const record: ExecutionRun = { id: 'saved', kind: 'single', startedAt: 1, status, steps: [{
+      id: 'step', target: target('build'), args: [], status: 'failed', command: { executable: 'make', args: [], cwd: '.' },
+    }] };
+    const restored = new ExecutionController(undefined, undefined, [record]);
+    controllers.push(restored);
+    const tree = new ExecutionTreeProvider(restored);
+    expect(getResumeIndex(record)).toBeUndefined();
+    expect(restored.resume(record.id)).toBeUndefined();
+    expect(tree.getTreeItem(tree.getRunNode(record)).contextValue).not.toBe('executionCompletedResumable');
+    expect(runner.resume('missing')).toBeUndefined();
+    expect(launched).toHaveLength(0);
+    tree.dispose();
+  });
+
+  it('ignores deleted records and disposed controllers', async () => {
+    const runner = controller();
+    const original = runner.startSingle(target('build'));
+    await vi.waitFor(() => expect(launched).toHaveLength(1));
+    end(0, 2);
+    await original.completion;
+    runner.dispose();
+    expect(runner.resume(original.run.id)).toBeUndefined();
+    runner.deleteRun(original.run.id);
+    expect(runner.resume(original.run.id)).toBeUndefined();
+  });
+});
+
 describe('task lifecycle races', () => {
   it('captures early completion while ignoring unrelated tasks and later task-end events', async () => {
     mock.tasks.executeTask.mockImplementation(async (task: vscode.Task): Promise<vscode.TaskExecution> => {
@@ -425,7 +588,7 @@ describe('execution tree', () => {
     expect((tree.getTreeItem(children[0]!).iconPath as unknown as mock.ThemeIcon).id).toBe('loading~spin');
     end(0, 4);
     await handle.completion;
-    expect(tree.getTreeItem(root).contextValue).toBe('executionCompletedSequence');
+    expect(tree.getTreeItem(root).contextValue).toBe('executionCompletedResumable');
     expect(tree.getTreeItem(root).description).toContain('1/2 completed');
     expect(tree.getTreeItem(root).tooltip).toContain('Exit code 4');
     expect(tree.getTreeItem(children[0]!).description).toBe('Failed · exit 4');

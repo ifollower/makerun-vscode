@@ -218,6 +218,15 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
     vscode.commands.registerCommand('makefileTasks.clearExecutionHistory', () => executions.clearCompleted()),
+    vscode.commands.registerCommand('makefileTasks.resumeExecution', async (argument?: ExecutionRunNode | string) => {
+      const run = runFromArgument(argument);
+      const handle = run && executions.resume(run.id);
+      if (handle) {
+        await handle.completion;
+        return handle.run;
+      }
+      return undefined;
+    }),
     vscode.commands.registerCommand('makefileTasks.rerunExecution', async (argument?: ExecutionRunNode | string) => {
       const run = runFromArgument(argument);
       const handle = run && executions.rerun(run.id);

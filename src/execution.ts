@@ -39,6 +39,11 @@ export function isRunActive(run: ExecutionRun): boolean {
   return run.status === 'preparing' || run.status === 'running';
 }
 
+export function getResumeIndex(run: ExecutionRun): number | undefined {
+  const index = run.status === 'failed' ? run.steps.findIndex((step) => step.status !== 'succeeded') : -1;
+  return index < 0 ? undefined : index;
+}
+
 export class ExecutionController implements vscode.Disposable {
   private readonly changed = new vscode.EventEmitter<void>();
   public readonly onDidChange = this.changed.event;
@@ -85,8 +90,22 @@ export class ExecutionController implements vscode.Disposable {
     if (!run || isRunActive(run) || this.disposed) {
       return undefined;
     }
+    return this.restart(run, index, 0);
+  }
+
+  public resume(id: string): ExecutionHandle | undefined {
+    const index = this.runs.findIndex((run) => run.id === id);
+    const run = this.runs[index];
+    const startIndex = run && getResumeIndex(run);
+    if (!run || startIndex === undefined || this.disposed) {
+      return undefined;
+    }
+    return this.restart(run, index, startIndex);
+  }
+
+  private restart(run: ExecutionRun, index: number, startIndex: number): ExecutionHandle {
     const attemptId = randomUUID();
-    run.steps = run.steps.map((step, stepIndex) => ({
+    run.steps = run.steps.map((step, stepIndex) => stepIndex < startIndex ? step : ({
       id: `${attemptId}:${stepIndex}`, target: { ...step.target }, args: [...step.args], status: 'waiting',
       command: getMakeTaskCommand(step.target, step.args),
     }));
@@ -94,7 +113,7 @@ export class ExecutionController implements vscode.Disposable {
     run.status = 'preparing';
     delete run.error;
     this.runs.splice(index, 1);
-    return this.launch(run);
+    return this.launch(run, startIndex);
   }
 
   public deleteRun(id: string): boolean {
@@ -135,28 +154,29 @@ export class ExecutionController implements vscode.Disposable {
     return this.launch(run);
   }
 
-  private launch(run: ExecutionRun): ExecutionHandle {
+  private launch(run: ExecutionRun, startIndex = 0): ExecutionHandle {
     const source = new vscode.CancellationTokenSource();
     this.cancellations.set(run.id, source);
     this.runs.unshift(run);
     this.changed.fire();
     this.started.fire(run);
-    return { run, completion: this.execute(run, source) };
+    return { run, completion: this.execute(run, source, startIndex) };
   }
 
-  private async execute(run: ExecutionRun, source: vscode.CancellationTokenSource): Promise<void> {
+  private async execute(run: ExecutionRun, source: vscode.CancellationTokenSource, startIndex: number): Promise<void> {
+    const steps = run.steps.slice(startIndex);
     try {
-      const targets = await this.prepare(run.steps.map((step) => step.target));
+      const targets = await this.prepare(steps.map((step) => step.target));
       if (source.token.isCancellationRequested) {
         run.status = 'cancelled';
         return;
       }
-      if (targets.length !== run.steps.length) {
+      if (targets.length !== steps.length) {
         throw new Error('Not all selected targets could be prepared. No targets were started.');
       }
       run.status = 'running';
       this.changed.fire();
-      for (const [index, step] of run.steps.entries()) {
+      for (const [index, step] of steps.entries()) {
         if (source.token.isCancellationRequested) {
           run.status = 'cancelled';
           break;

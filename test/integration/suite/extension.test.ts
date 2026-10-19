@@ -43,6 +43,7 @@ suite('Make Run Tasks extension', () => {
       'makefileTasks.cancelExecution',
       'makefileTasks.clearExecutionHistory',
       'makefileTasks.rerunExecution',
+      'makefileTasks.resumeExecution',
       'makefileTasks.deleteExecution',
       'makefileTasks.showExecutionCommands',
       'makefileTasks.copyExecutionCommands',
@@ -160,6 +161,10 @@ suite('Make Run Tasks extension', () => {
       assert.equal(retried?.status, 'failed', 'The original failure arguments must be preserved.');
       assert.notEqual(retried?.steps[0]?.id, heldExecution?.task.definition.executionId);
       assert.ok(heldExecution && vscode.tasks.taskExecutions.includes(heldExecution), 'The independent task must still be active.');
+      const resumed = await vscode.commands.executeCommand<ExecutionRun>('makefileTasks.resumeExecution', failed.id);
+      assert.equal(resumed?.id, failed.id);
+      assert.equal(resumed?.status, 'failed', 'Resume must preserve the failed target arguments.');
+      assert.ok(vscode.tasks.taskExecutions.includes(heldExecution), 'Resuming must not affect the independent run.');
       const fresh = await vscode.commands.executeCommand<ExecutionRun>('makefileTasks.runTarget', goal);
       assert.equal(fresh?.status, 'succeeded');
       assert.ok(vscode.tasks.taskExecutions.includes(heldExecution), 'Starting another task must not end the independent run.');
@@ -170,7 +175,7 @@ suite('Make Run Tasks extension', () => {
     }
   });
 
-  test('orchestrates real process tasks sequentially and stops on failure', async () => {
+  test('orchestrates real process tasks, stops on failure and resumes only remaining goals', async () => {
     const folder = vscode.workspace.workspaceFolders?.[0];
     assert.ok(folder);
     const target = (name: string): MakefileTarget => ({
@@ -178,10 +183,11 @@ suite('Make Run Tasks extension', () => {
       makefileUri: vscode.Uri.joinPath(folder.uri, 'Makefile'), makefileRelativePath: 'Makefile',
     });
     const launched: string[] = [];
+    let shouldFail = true;
     const runner = new ExecutionController(async (targets) => targets, (goal, _args, executionId) => {
       launched.push(goal.name);
       return new vscode.Task({ type: 'process', executionId }, folder, goal.name, 'Make Run Tasks Tests',
-        new vscode.ProcessExecution('node', ['-e', `process.exit(${goal.name === 'fail' ? 2 : 0})`]), []);
+        new vscode.ProcessExecution('node', ['-e', `process.exit(${goal.name === 'fail' && shouldFail ? 2 : 0})`]), []);
     });
     try {
       const handle = runner.startSequence([target('first'), target('fail'), target('skipped')]);
@@ -191,6 +197,19 @@ suite('Make Run Tasks extension', () => {
       assert.equal(handle.run.status, 'failed');
       assert.deepEqual(handle.run.steps.map((step) => step.status), ['succeeded', 'failed', 'skipped']);
       assert.equal(handle.run.steps[1]?.exitCode, 2);
+      const prefix = handle.run.steps[0];
+      const oldStepId = handle.run.steps[1]?.id;
+      shouldFail = false;
+      const resumed = runner.resume(handle.run.id);
+      assert.ok(resumed);
+      await resumed.completion;
+      assert.equal(resumed.run, handle.run);
+      assert.equal(resumed.run.steps[0], prefix);
+      assert.notEqual(resumed.run.steps[1]?.id, oldStepId);
+      assert.deepEqual(launched, ['first', 'fail', 'fail', 'skipped']);
+      assert.equal(resumed.run.status, 'succeeded');
+      assert.deepEqual(resumed.run.steps.map((step) => step.status), ['succeeded', 'succeeded', 'succeeded']);
+      assert.equal(runner.getRuns().length, 1);
     } finally {
       runner.dispose();
     }

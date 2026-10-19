@@ -1,9 +1,9 @@
 # Changelog
 
-## Unreleased
+## 1.7.10 (2026-10-19)
 
+* Add Resume from Failure to failed Execution records, preserving successful targets and resuming remaining targets in the same saved history entry.
 * Allow new sequences and in-place reruns of ended sequences while other runs are active, keeping ordering and cancellation independent per run.
-
 * Preserve Execution history across window reloads in workspace storage; restore unfinished runs as interrupted without resuming tasks.
 * Add in-place rerun and per-record deletion to Execution history, sorting reruns by their latest start time.
 * Add command inspection, safe command copying, and navigation to Makefile definitions from run history.
