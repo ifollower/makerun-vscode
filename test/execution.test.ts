@@ -2,7 +2,7 @@ import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as vscode from 'vscode';
 import { executeTaskAndWait } from '../src/batch';
-import { ExecutionController, getResumeIndex, type ExecutionRun } from '../src/execution';
+import { ExecutionController, getResumeIndex, getRunDuration, getStepDuration, type ExecutionRun } from '../src/execution';
 import { ExecutionTreeProvider } from '../src/executionTree';
 import { formatExecutionCommands } from '../src/executionCommands';
 import type { MakefileTarget } from '../src/model';
@@ -42,6 +42,8 @@ beforeEach(() => {
 afterEach(async () => {
   controllers.splice(0).forEach((item) => item.dispose());
   await Promise.resolve();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 function end(index: number, exitCode = 0): void {
@@ -542,6 +544,142 @@ describe('resuming failed runs', () => {
   });
 });
 
+describe('execution timing', () => {
+  const flush = async (): Promise<void> => {
+    for (let index = 0; index < 6; index += 1) {
+      await Promise.resolve();
+    }
+  };
+
+  it('measures preparation and steps, preserves resume totals and resets timing on a full rerun', async () => {
+    let now = 10_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    let prepared!: (targets: readonly MakefileTarget[]) => void;
+    const runner = controller(() => new Promise((resolve) => { prepared = resolve; }));
+    const tree = new ExecutionTreeProvider(runner);
+    const original = runner.startSequence([target('clean'), target('build'), target('test')])!;
+    now = 10_500;
+    prepared(original.run.steps.map((step) => step.target));
+    await flush();
+    expect(launched).toHaveLength(1);
+    now = 11_700;
+    expect(getStepDuration(original.run.steps[0]!)).toBe(1200);
+    expect(getRunDuration(original.run)).toBe(1700);
+    end(0);
+    await flush();
+    expect(launched).toHaveLength(2);
+    now = 12_200;
+    end(1, 2);
+    await original.completion;
+    expect(original.run.durationMs).toBe(2200);
+    expect(original.run.steps.map((step) => step.durationMs)).toEqual([1200, 500, undefined]);
+    expect(original.run.steps[2]!.startedAt).toBeUndefined();
+    const root = tree.getRunNode(original.run);
+    expect(tree.getTreeItem(root).description).toContain('Total 2.2s');
+    expect(tree.getTreeItem(tree.getChildren(root)[0]!).description).toContain('1.2s');
+    now = 90_000;
+    expect(getRunDuration(original.run)).toBe(2200);
+    const prefix = original.run.steps[0];
+    const resumed = runner.resume(original.run.id)!;
+    prepared(original.run.steps.slice(1).map((step) => step.target));
+    await flush();
+    now = 90_400;
+    end(2);
+    await flush();
+    now = 90_700;
+    end(3);
+    await resumed.completion;
+    expect(original.run.durationMs).toBe(2900);
+    expect(original.run.steps[0]).toBe(prefix);
+    expect(original.run.steps.map((step) => step.durationMs)).toEqual([1200, 400, 300]);
+    const rerun = runner.rerun(original.run.id)!;
+    expect(original.run.durationMs).toBe(0);
+    expect(original.run.steps.every((step) => step.startedAt === undefined && step.durationMs === undefined)).toBe(true);
+    runner.cancelRun(original.run.id);
+    now += 250;
+    prepared(original.run.steps.map((step) => step.target));
+    await rerun.completion;
+    expect(original.run.durationMs).toBe(250);
+    tree.dispose();
+  });
+
+  it('accumulates a resume from the first failed step and times cancellation independently', async () => {
+    let now = 1000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const runner = controller();
+    const original = runner.startSingle(target('build'));
+    await flush();
+    now = 3500;
+    end(0, 2);
+    await original.completion;
+    now = 20_000;
+    const resumed = runner.resume(original.run.id)!;
+    await flush();
+    now = 21_000;
+    end(1);
+    await resumed.completion;
+    expect(original.run.durationMs).toBe(3500);
+    expect(original.run.steps[0]!.durationMs).toBe(1000);
+    now = 30_000;
+    const cancelled = runner.startSingle(target('lint'));
+    await flush();
+    now = 30_500;
+    runner.cancelRun(cancelled.run.id);
+    await cancelled.completion;
+    expect(cancelled.run.durationMs).toBe(500);
+    expect(cancelled.run.steps[0]!.durationMs).toBe(500);
+    expect(original.run.durationMs).toBe(3500);
+  });
+
+  it('records preparation and launch failures without assigning time to skipped steps', async () => {
+    let now = 1000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const preparing = controller(async () => { now += 250; throw new Error('Save failed'); });
+    const failed = preparing.startSingle(target('build'));
+    await failed.completion;
+    expect(failed.run.durationMs).toBe(250);
+    expect(failed.run.steps[0]!.durationMs).toBeUndefined();
+    const runner = controller();
+    mock.tasks.executeTask.mockImplementationOnce(async () => { now += 70; throw new Error('Launch failed'); });
+    const launch = runner.startSingle(target('test'));
+    await launch.completion;
+    expect(launch.run.durationMs).toBe(70);
+    expect(launch.run.steps[0]!.durationMs).toBe(70);
+  });
+
+  it('refreshes live timing once per second without writing history or keeping a timer after completion', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(10_000);
+    const runner = controller();
+    const tree = new ExecutionTreeProvider(runner);
+    const changed = vi.fn();
+    const historyChanged = vi.fn();
+    tree.onDidChangeTreeData(changed);
+    runner.onDidChange(historyChanged);
+    const handle = runner.startSingle(target('build'));
+    await flush();
+    changed.mockClear();
+    historyChanged.mockClear();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(changed).toHaveBeenCalledOnce();
+    expect(historyChanged).not.toHaveBeenCalled();
+    expect(tree.getTreeItem(tree.getRunNode(handle.run)).description).toContain('Total 1.0s');
+    end(0);
+    await handle.completion;
+    changed.mockClear();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(changed).not.toHaveBeenCalled();
+    const second = runner.startSingle(target('test'));
+    await flush();
+    tree.dispose();
+    changed.mockClear();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(changed).not.toHaveBeenCalled();
+    end(1);
+    await second.completion;
+  });
+});
+
 describe('task lifecycle races', () => {
   it('captures early completion while ignoring unrelated tasks and later task-end events', async () => {
     mock.tasks.executeTask.mockImplementation(async (task: vscode.Task): Promise<vscode.TaskExecution> => {
@@ -591,8 +729,8 @@ describe('execution tree', () => {
     expect(tree.getTreeItem(root).contextValue).toBe('executionCompletedResumable');
     expect(tree.getTreeItem(root).description).toContain('1/2 completed');
     expect(tree.getTreeItem(root).tooltip).toContain('Exit code 4');
-    expect(tree.getTreeItem(children[0]!).description).toBe('Failed · exit 4');
-    expect(tree.getTreeItem(children[1]!).description).toBe('Skipped');
+    expect(tree.getTreeItem(children[0]!).description).toContain('Failed · exit 4 · ');
+    expect(tree.getTreeItem(children[1]!).description).toBe('Skipped · —');
     expect(tree.getTreeItem(children[0]!).command).toBeUndefined();
     runner.clearCompleted();
     expect(tree.getChildren()).toEqual([]);

@@ -14,6 +14,8 @@ export interface ExecutionStep {
   readonly args: readonly string[];
   command: MakeTaskCommand;
   status: StepStatus;
+  startedAt?: number;
+  durationMs?: number;
   exitCode?: number;
   error?: string;
 }
@@ -22,6 +24,7 @@ export interface ExecutionRun {
   readonly id: string;
   readonly kind: 'single' | 'sequence';
   startedAt: number;
+  durationMs?: number;
   steps: readonly ExecutionStep[];
   status: RunStatus;
   error?: string;
@@ -42,6 +45,17 @@ export function isRunActive(run: ExecutionRun): boolean {
 export function getResumeIndex(run: ExecutionRun): number | undefined {
   const index = run.status === 'failed' ? run.steps.findIndex((step) => step.status !== 'succeeded') : -1;
   return index < 0 ? undefined : index;
+}
+
+/** Active runs keep the accumulated duration of earlier resume attempts as their base. */
+export function getRunDuration(run: ExecutionRun, now = Date.now()): number | undefined {
+  return run.durationMs === undefined ? undefined
+    : run.durationMs + (isRunActive(run) ? Math.max(0, now - run.startedAt) : 0);
+}
+
+export function getStepDuration(step: ExecutionStep, now = Date.now()): number | undefined {
+  return step.status === 'running' && step.startedAt !== undefined
+    ? Math.max(0, now - step.startedAt) : step.durationMs;
 }
 
 export class ExecutionController implements vscode.Disposable {
@@ -100,15 +114,16 @@ export class ExecutionController implements vscode.Disposable {
     if (!run || startIndex === undefined || this.disposed) {
       return undefined;
     }
-    return this.restart(run, index, startIndex);
+    return this.restart(run, index, startIndex, true);
   }
 
-  private restart(run: ExecutionRun, index: number, startIndex: number): ExecutionHandle {
+  private restart(run: ExecutionRun, index: number, startIndex: number, resume = false): ExecutionHandle {
     const attemptId = randomUUID();
     run.steps = run.steps.map((step, stepIndex) => stepIndex < startIndex ? step : ({
       id: `${attemptId}:${stepIndex}`, target: { ...step.target }, args: [...step.args], status: 'waiting',
       command: getMakeTaskCommand(step.target, step.args),
     }));
+    run.durationMs = resume ? (run.durationMs ?? 0) : 0;
     run.startedAt = Date.now();
     run.status = 'preparing';
     delete run.error;
@@ -145,7 +160,7 @@ export class ExecutionController implements vscode.Disposable {
     }
     const id = randomUUID();
     const run: ExecutionRun = {
-      id, kind, startedAt: Date.now(), status: 'preparing',
+      id, kind, startedAt: Date.now(), durationMs: 0, status: 'preparing',
       steps: targets.map((target, index) => ({
         id: `${id}:${index}`, target: { ...target }, args: [...args], status: 'waiting',
         command: getMakeTaskCommand(target, args),
@@ -165,6 +180,7 @@ export class ExecutionController implements vscode.Disposable {
 
   private async execute(run: ExecutionRun, source: vscode.CancellationTokenSource, startIndex: number): Promise<void> {
     const steps = run.steps.slice(startIndex);
+    const previousDuration = run.durationMs ?? 0;
     try {
       const targets = await this.prepare(steps.map((step) => step.target));
       if (source.token.isCancellationRequested) {
@@ -182,6 +198,7 @@ export class ExecutionController implements vscode.Disposable {
           break;
         }
         step.status = 'running';
+        step.startedAt = Date.now();
         const task = this.createTask(targets[index]!, step.args, step.id);
         if (task.execution instanceof vscode.ShellExecution && task.execution.command) {
           const shell = task.execution;
@@ -193,6 +210,7 @@ export class ExecutionController implements vscode.Disposable {
         }
         this.changed.fire();
         const result = await executeTaskAndWait(task, source.token);
+        step.durationMs = Math.max(0, Date.now() - step.startedAt);
         if (result.exitCode !== undefined) {
           step.exitCode = result.exitCode;
         }
@@ -222,10 +240,14 @@ export class ExecutionController implements vscode.Disposable {
       run.error = error instanceof Error ? error.message : String(error);
       const running = run.steps.find((step) => step.status === 'running');
       if (running) {
+        if (running.startedAt !== undefined) {
+          running.durationMs = Math.max(0, Date.now() - running.startedAt);
+        }
         running.status = run.status === 'cancelled' ? 'cancelled' : 'failed';
         running.error = run.error;
       }
     } finally {
+      run.durationMs = previousDuration + Math.max(0, Date.now() - run.startedAt);
       for (const step of run.steps) {
         if (step.status === 'waiting') {
           step.status = 'skipped';

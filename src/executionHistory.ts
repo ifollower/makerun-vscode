@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { EXECUTION_HISTORY_LIMIT, isRunActive, type ExecutionController, type ExecutionRun, type ExecutionStep } from './execution';
+import { EXECUTION_HISTORY_LIMIT, getRunDuration, getStepDuration, isRunActive, type ExecutionController, type ExecutionRun, type ExecutionStep } from './execution';
 import type { MakefileTarget } from './model';
 
 export const EXECUTION_HISTORY_KEY = 'makefileTasks.executionHistory';
@@ -19,13 +19,18 @@ interface StoredHistory {
   readonly runs: readonly StoredRun[];
 }
 
+function durationSnapshot(durationMs: number | undefined): { durationMs?: number } {
+  return durationMs === undefined ? {} : { durationMs };
+}
+
 export function serializeExecutionHistory(runs: readonly ExecutionRun[]): StoredHistory {
+  const now = Date.now();
   return {
     version: 1,
     runs: runs.map((run) => ({
-      ...run,
+      ...run, ...durationSnapshot(getRunDuration(run, now)),
       steps: run.steps.map((step) => ({
-        ...step, args: [...step.args], command: { ...step.command, args: [...step.command.args] },
+        ...step, ...durationSnapshot(getStepDuration(step, now)), args: [...step.args], command: { ...step.command, args: [...step.command.args] },
         target: {
           ...step.target, makefileUri: step.target.makefileUri.toString(),
           workspaceFolder: {
@@ -48,9 +53,14 @@ function optionalString(value: unknown): boolean {
   return value === undefined || typeof value === 'string';
 }
 
+function optionalTime(value: unknown): boolean {
+  return value === undefined || (typeof value === 'number' && Number.isFinite(value) && value >= 0);
+}
+
 function restoreStep(value: unknown): ExecutionStep | undefined {
   if (!isRecord(value) || typeof value.id !== 'string' || !value.id || !isStrings(value.args)
     || typeof value.status !== 'string' || !['waiting', 'running', 'succeeded', 'failed', 'cancelled', 'skipped', 'interrupted'].includes(value.status)
+    || !optionalTime(value.startedAt) || !optionalTime(value.durationMs)
     || !optionalString(value.error) || (value.exitCode !== undefined && !Number.isInteger(value.exitCode))) {
     return undefined;
   }
@@ -89,7 +99,7 @@ export function restoreExecutionHistory(value: unknown): ExecutionRun[] {
       || !['single', 'sequence'].includes(entry.kind as string)
       || typeof entry.startedAt !== 'number' || !Number.isFinite(entry.startedAt) || entry.startedAt < 0
       || typeof entry.status !== 'string' || !['preparing', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted'].includes(entry.status)
-      || !optionalString(entry.error) || !Array.isArray(entry.steps) || entry.steps.length === 0
+      || !optionalTime(entry.durationMs) || !optionalString(entry.error) || !Array.isArray(entry.steps) || entry.steps.length === 0
       || (entry.kind === 'single' && entry.steps.length !== 1)) {
       continue;
     }
@@ -125,6 +135,7 @@ export function restoreExecutionHistory(value: unknown): ExecutionRun[] {
 export class ExecutionHistoryStore implements vscode.Disposable {
   private pending: Promise<void> = Promise.resolve();
   private subscription: vscode.Disposable | undefined;
+  private controller: ExecutionController | undefined;
 
   public constructor(private readonly state: vscode.Memento, private readonly onError: (error: unknown) => void) {}
 
@@ -133,9 +144,16 @@ export class ExecutionHistoryStore implements vscode.Disposable {
   }
 
   public bind(controller: ExecutionController): void {
+    this.controller = controller;
     this.subscription = controller.onDidChange(() => this.save(controller.getRuns()));
     if (controller.getRuns().length > 0) {
       this.save(controller.getRuns());
+    }
+  }
+
+  public checkpoint(): void {
+    if (this.controller) {
+      this.save(this.controller.getRuns());
     }
   }
 

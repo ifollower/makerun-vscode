@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.7.11 (2026-10-22)
+
+* Show total and per-step elapsed times in Execution history, refresh live timings, and preserve durations across reloads with rerun/resume timing support.
+
 ## 1.7.10 (2026-10-19)
 
 * Add Resume from Failure to failed Execution records, preserving successful targets and resuming remaining targets in the same saved history entry.

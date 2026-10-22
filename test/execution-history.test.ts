@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type * as vscode from 'vscode';
-import { ExecutionController, type ExecutionRun } from '../src/execution';
+import { ExecutionController, getRunDuration, getStepDuration, type ExecutionRun } from '../src/execution';
 import { ExecutionTreeProvider } from '../src/executionTree';
 import { EXECUTION_HISTORY_KEY, ExecutionHistoryStore, restoreExecutionHistory, serializeExecutionHistory } from '../src/executionHistory';
 import type { MakefileTarget } from '../src/model';
@@ -41,9 +41,73 @@ beforeEach(() => {
 afterEach(async () => {
   controllers.splice(0).forEach((controller) => controller.dispose());
   await Promise.resolve();
+  vi.restoreAllMocks();
 });
 
 describe('persistent execution history', () => {
+  it('persists recorded durations and restores legacy history with unknown durations', async () => {
+    let now = 10_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    mock.tasks.executeTask.mockImplementation(async (task: vscode.Task): Promise<vscode.TaskExecution> => {
+      const execution = { task, terminate: vi.fn() };
+      now += 200;
+      mock.processEnd.fire({ execution, exitCode: 0 });
+      return execution;
+    });
+    const controller = runner();
+    const { store } = memoryStore();
+    store.bind(controller);
+    const handle = controller.startSequence([target('clean'), target('build')])!;
+    await handle.completion;
+    await store.flush();
+    const saved = store.restore()[0]!;
+    expect(saved.durationMs).toBe(400);
+    expect(saved.steps.map((step) => step.durationMs)).toEqual([200, 200]);
+    const legacy = serializeExecutionHistory([saved]);
+    delete legacy.runs[0]!.durationMs;
+    for (const step of legacy.runs[0]!.steps) {
+      delete step.startedAt;
+      delete step.durationMs;
+    }
+    const loaded = restoreExecutionHistory(legacy);
+    expect(loaded).toHaveLength(1);
+    expect(getRunDuration(loaded[0]!)).toBeUndefined();
+    const restored = runner(loaded);
+    const tree = new ExecutionTreeProvider(restored);
+    const root = tree.getChildren()[0]!;
+    expect(tree.getTreeItem(root).description).toContain('Total —');
+    expect(tree.getTreeItem(tree.getChildren(root)[0]!).description).toContain('· —');
+    for (const invalid of [-1, NaN, 'bad']) {
+      expect(restoreExecutionHistory({ ...legacy, runs: [{ ...legacy.runs[0], durationMs: invalid }] })).toEqual([]);
+      expect(restoreExecutionHistory({ ...legacy, runs: [{ ...legacy.runs[0], steps: [{ ...legacy.runs[0]!.steps[0], durationMs: invalid }] }] })).toEqual([]);
+    }
+    tree.dispose();
+    store.dispose();
+  });
+
+  it('checkpoints live timing and freezes interrupted records without counting time while the window was closed', async () => {
+    let now = 1000;
+    vi.spyOn(Date, 'now').mockImplementation(() => now);
+    mock.tasks.executeTask.mockImplementation(async (task: vscode.Task): Promise<vscode.TaskExecution> => ({ task, terminate: vi.fn() }));
+    const controller = runner();
+    const { store } = memoryStore();
+    store.bind(controller);
+    const handle = controller.startSingle(target('build'));
+    await Promise.resolve();
+    await Promise.resolve();
+    now = 3345;
+    store.checkpoint();
+    await store.flush();
+    now += 86_400_000;
+    const restored = store.restore()[0]!;
+    expect(restored.status).toBe('interrupted');
+    expect(getRunDuration(restored)).toBe(2345);
+    expect(getStepDuration(restored.steps[0]!)).toBe(2345);
+    controller.cancelRun(handle.run.id);
+    await handle.completion;
+    store.dispose();
+  });
+
   it('round-trips results, parameters, URI objects and command snapshots without starting tasks on restore', async () => {
     const controller = runner();
     const { store, state } = memoryStore();

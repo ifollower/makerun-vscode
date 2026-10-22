@@ -337,6 +337,7 @@ export function activate(context: vscode.ExtensionContext): void {
 }
 
 export async function deactivate(): Promise<void> {
+  activeHistory?.checkpoint();
   await activeHistory?.flush();
   activeHistory = undefined;
 }

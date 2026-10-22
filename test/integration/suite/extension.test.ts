@@ -101,6 +101,8 @@ suite('Make Run Tasks extension', () => {
     assert.equal(clicked?.status, 'succeeded');
     assert.equal(clicked?.steps[0]?.exitCode, 0);
     assert.ok(clicked);
+    assert.ok(typeof clicked.durationMs === 'number' && clicked.durationMs >= 0);
+    assert.ok(typeof clicked.steps[0]?.durationMs === 'number' && clicked.steps[0].durationMs >= 0);
     const oldExecutionId = clicked.steps[0]?.id;
     const rerun = await vscode.commands.executeCommand<ExecutionRun>('makefileTasks.rerunExecution', clicked.id);
     assert.equal(rerun?.id, clicked.id, 'Rerun must keep the original history entry identity.');
@@ -198,6 +200,8 @@ suite('Make Run Tasks extension', () => {
       assert.deepEqual(handle.run.steps.map((step) => step.status), ['succeeded', 'failed', 'skipped']);
       assert.equal(handle.run.steps[1]?.exitCode, 2);
       const prefix = handle.run.steps[0];
+      const durationBeforeResume = handle.run.durationMs;
+      assert.ok(typeof durationBeforeResume === 'number');
       const oldStepId = handle.run.steps[1]?.id;
       shouldFail = false;
       const resumed = runner.resume(handle.run.id);
@@ -208,6 +212,8 @@ suite('Make Run Tasks extension', () => {
       assert.notEqual(resumed.run.steps[1]?.id, oldStepId);
       assert.deepEqual(launched, ['first', 'fail', 'fail', 'skipped']);
       assert.equal(resumed.run.status, 'succeeded');
+      assert.ok(typeof resumed.run.durationMs === 'number' && resumed.run.durationMs >= durationBeforeResume);
+      assert.ok(resumed.run.steps.every((step) => typeof step.durationMs === 'number' && step.durationMs >= 0));
       assert.deepEqual(resumed.run.steps.map((step) => step.status), ['succeeded', 'succeeded', 'succeeded']);
       assert.equal(runner.getRuns().length, 1);
     } finally {
